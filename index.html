@@ -56,7 +56,17 @@
     const UNIT = 1000000;
 
     // --- Firebase Initialization ---
-    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+    // 💡 깃허브 등에 호스팅할 때 실시간 취합 기능을 쓰려면 아래에 본인의 Firebase 설정을 채워주세요.
+    const myFirebaseConfig = {
+      // apiKey: "본인의 API 키",
+      // authDomain: "본인의 Auth Domain",
+      // projectId: "본인의 Project ID",
+      // storageBucket: "본인의 Storage Bucket",
+      // messagingSenderId: "본인의 Sender ID",
+      // appId: "본인의 App ID"
+    };
+
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : myFirebaseConfig;
     const app = Object.keys(firebaseConfig).length > 0 ? initializeApp(firebaseConfig) : null;
     const auth = app ? getAuth(app) : null;
     const db = app ? getFirestore(app) : null;
@@ -170,6 +180,20 @@
     };
 
     window.handleSubmitVote = async () => {
+      // 데이터베이스(Firebase) 연결이 안 된 깃허브 환경 등에서는 데모(체험) 모드로 작동하게 합니다.
+      if (!db) {
+        state.loading = true;
+        render();
+        setTimeout(() => {
+          // 서버 없이 본인의 투표 결과만 가짜로 화면에 보여주며 다음 창으로 넘김
+          state.globalTotals = { ...state.investments }; 
+          state.step = 'result';
+          state.loading = false;
+          render();
+        }, 800);
+        return;
+      }
+
       if (!state.user || !db) return;
       state.loading = true;
       state.errorMsg = null;
