@@ -81,11 +81,17 @@
         import { getFirestore, collection, doc, setDoc, onSnapshot, increment, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- Firebase Initialization ---
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
+        let app, auth, db;
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'myeongji-startup-app';
+        try {
+            const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { projectId: "demo-project" };
+            app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getFirestore(app);
+        } catch (error) {
+            console.error("Firebase Initialization Error:", error);
+            document.getElementById('loading-screen').innerHTML = '<span class="text-red-500">서버 연결에 실패했어요. 새로고침을 해주세요! 😥</span>';
+        }
 
         // --- Constants ---
         const TOTAL_BUDGET = 10000000;
@@ -463,6 +469,8 @@
 
         // --- Initialization & Listeners ---
         const init = async () => {
+            if (!auth || !db) return; // Stop if initialization failed
+
             // Auth setup
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -472,41 +480,51 @@
                 }
             } catch (err) {
                 console.error("Auth Error:", err);
+                document.getElementById('loading-screen').innerHTML = '<span class="text-red-500">인증에 실패했어요. 새로고침을 해주세요! 😥</span>';
+                return;
             }
 
             onAuthStateChanged(auth, async (currentUser) => {
                 state.user = currentUser;
                 if (currentUser) {
-                    const voteRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'vote_status', 'status');
-                    const voteSnap = await getDoc(voteRef);
-                    if (voteSnap.exists()) {
-                        state.hasVoted = true;
-                        state.myClass = voteSnap.data().myClass;
-                        state.view = 'leaderboard';
+                    try {
+                        const voteRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'vote_status', 'status');
+                        const voteSnap = await getDoc(voteRef);
+                        if (voteSnap.exists()) {
+                            state.hasVoted = true;
+                            state.myClass = voteSnap.data().myClass;
+                            state.view = 'leaderboard';
+                        }
+                    } catch (e) {
+                        console.error("Data Load Error:", e);
                     }
 
                     // Setup realtime listener for teams
-                    const q = collection(db, 'artifacts', appId, 'public', 'data', TEAMS_COLLECTION);
-                    onSnapshot(q, (snapshot) => {
-                        const dbData = {};
-                        snapshot.forEach(doc => {
-                            dbData[doc.id] = doc.data();
+                    try {
+                        const q = collection(db, 'artifacts', appId, 'public', 'data', TEAMS_COLLECTION);
+                        onSnapshot(q, (snapshot) => {
+                            const dbData = {};
+                            snapshot.forEach(doc => {
+                                dbData[doc.id] = doc.data();
+                            });
+
+                            const merged = INITIAL_TEAMS.map(team => ({
+                                ...team,
+                                totalInvestment: dbData[team.id]?.totalInvestment || 0,
+                                investors: dbData[team.id]?.investors || 0
+                            }));
+
+                            merged.sort((a, b) => b.totalInvestment - a.totalInvestment);
+                            state.liveTeams = merged;
+                            
+                            // Re-render if leaderboard is active to show live updates
+                            if (state.view === 'leaderboard') render();
+                        }, (error) => {
+                            console.error("Firestore Listen Error:", error);
                         });
-
-                        const merged = INITIAL_TEAMS.map(team => ({
-                            ...team,
-                            totalInvestment: dbData[team.id]?.totalInvestment || 0,
-                            investors: dbData[team.id]?.investors || 0
-                        }));
-
-                        merged.sort((a, b) => b.totalInvestment - a.totalInvestment);
-                        state.liveTeams = merged;
-                        
-                        // Re-render if leaderboard is active to show live updates
-                        if (state.view === 'leaderboard') render();
-                    }, (error) => {
-                        console.error("Firestore Listen Error:", error);
-                    });
+                    } catch (e) {
+                        console.error("Realtime Setup Error:", e);
+                    }
                 }
                 
                 state.loading = false;
