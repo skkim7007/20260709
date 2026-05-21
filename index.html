@@ -84,13 +84,27 @@
         let app, auth, db;
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'myeongji-startup-app';
         try {
-            const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { projectId: "demo-project" };
-            app = initializeApp(firebaseConfig);
-            auth = getAuth(app);
-            db = getFirestore(app);
+            if (typeof __firebase_config !== 'undefined') {
+                const firebaseConfig = JSON.parse(__firebase_config);
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+            } else {
+                throw new Error("데이터베이스 서버 설정이 없습니다.");
+            }
         } catch (error) {
             console.error("Firebase Initialization Error:", error);
-            document.getElementById('loading-screen').innerHTML = '<span class="text-red-500">서버 연결에 실패했어요. 새로고침을 해주세요! 😥</span>';
+            document.getElementById('loading-screen').innerHTML = `
+                <div class="text-center space-y-4 mx-4">
+                    <div class="text-red-500 font-black text-2xl sm:text-3xl">서버 연결에 실패했어요. 😥</div>
+                    <div class="text-sm sm:text-base font-bold text-slate-700 bg-white p-5 rounded-2xl border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] leading-relaxed text-left inline-block">
+                        <p class="mb-3 text-pink-600">이유: ${error.message}</p>
+                        <p>이 웹페이지는 실시간 투표를 위해 <b>서버(Firebase)</b>가 필요합니다.</p>
+                        <p>HTML 파일을 다운로드 받아 컴퓨터에서 직접 열었다면 서버가 없어서 실행되지 않습니다.</p>
+                        <p class="mt-4 text-blue-600 text-center text-lg">💡 화면 우측의 <b>'Preview(미리보기)'</b>를 통해 테스트해주세요!</p>
+                    </div>
+                </div>
+            `;
         }
 
         // --- Constants ---
