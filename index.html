@@ -46,8 +46,9 @@
 <body class="bg-[#FDF8E1] text-slate-900 pb-20 selection:bg-pink-300 min-h-screen">
     
     <!-- Loading Screen -->
-    <div id="loading-screen" class="min-h-screen flex items-center justify-center font-black text-2xl text-black">
-        🚀 로딩 중... 잠시만 기다려줘!
+    <div id="loading-screen" class="min-h-screen flex flex-col items-center justify-center font-black text-2xl text-black">
+        <div class="text-6xl mb-4 animate-bounce">🚀</div>
+        <div>로딩 중... 잠시만 기다려줘!</div>
     </div>
 
     <!-- Main App (Hidden initially) -->
@@ -80,8 +81,22 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, doc, setDoc, onSnapshot, increment, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // --- Firebase Initialization ---
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        // =========================================================================
+        // 🚨 필수 수정 🚨: GitHub Pages 배포를 위해 본인의 Firebase 설정값으로 변경해주세요!
+        // Firebase 콘솔 -> 프로젝트 설정 -> 내 앱 -> SDK 설정 및 구성에서 확인 가능
+        // =========================================================================
+        const myFirebaseConfig = {
+            apiKey: "여기에_API_KEY를_붙여넣으세요",
+            authDomain: "여기에_AUTH_DOMAIN을_붙여넣으세요",
+            projectId: "여기에_PROJECT_ID를_붙여넣으세요",
+            storageBucket: "여기에_STORAGE_BUCKET을_붙여넣으세요",
+            messagingSenderId: "여기에_MESSAGING_SENDER_ID를_붙여넣으세요",
+            appId: "여기에_APP_ID를_붙여넣으세요"
+        };
+        
+        // 미리보기 환경과 GitHub 환경을 호환하기 위한 처리
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : myFirebaseConfig;
+        
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
@@ -252,12 +267,15 @@
 
                     <!-- Submit Button -->
                     <div class="fixed bottom-4 left-4 right-4 z-50 sm:static sm:mt-10">
+                        <!-- 버튼 위에 에러 메시지가 표시되도록 flex-col 컨테이너 사용 -->
                         <div class="max-w-4xl mx-auto flex flex-col gap-2 sm:gap-3">
+                            
                             ${state.errorMsg ? `
                             <div class="bg-pink-500 text-white border-4 border-black rounded-xl p-3 sm:p-4 text-sm sm:text-base font-bold flex items-center justify-center gap-2 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] animate-bounce">
                                 ⚠️ ${state.errorMsg}
                             </div>
                             ` : ''}
+
                             <button
                                 onclick="window.submitInvestment()"
                                 ${state.isSubmitting ? 'disabled' : ''}
@@ -265,7 +283,7 @@
                             >
                                 ${state.isSubmitting ? '🚀 투자 전송 중...' : '🔥 투표 확정하기 (실시간 반영) 🔥'}
                             </button>
-                            <p class="text-center font-bold text-slate-500 mt-4 hidden sm:block bg-white/50 py-2 rounded-xl border-2 border-dashed border-slate-300">
+                            <p class="text-center font-bold text-slate-500 mt-2 hidden sm:block bg-white/50 py-2 rounded-xl border-2 border-dashed border-slate-300">
                                 ⚠️ 투표는 한 번만 가능! 1,000만원을 모두 소진하여 반드시 3팀에 투자해야 해.
                             </p>
                         </div>
@@ -472,6 +490,9 @@
                 }
             } catch (err) {
                 console.error("Auth Error:", err);
+                // 에러 발생시 로딩 해제 및 알림
+                state.loading = false;
+                document.getElementById('loading-screen').innerHTML = `<div class="text-red-500 font-bold p-4 text-center">Firebase 연결 오류!<br/>API 키 설정을 확인하거나 익명 로그인이 활성화되었는지 확인하세요.</div>`;
             }
 
             onAuthStateChanged(auth, async (currentUser) => {
