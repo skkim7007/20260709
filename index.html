@@ -1,0 +1,464 @@
+import React, { useState, useEffect } from 'react';
+import { Trophy, Coins, TrendingUp, AlertCircle, Users, CheckCircle, ArrowRight, Home } from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, collection, doc, setDoc, onSnapshot, increment, getDoc } from 'firebase/firestore';
+
+// --- Firebase Initialization ---
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'myeongji-startup-app';
+
+// --- Constants ---
+const TOTAL_BUDGET = 10000000;
+const UNIT = 1000000;
+const MAX_TEAMS = 3;
+const TEAMS_COLLECTION = 'investments_v1';
+
+const INITIAL_TEAMS = Array.from({ length: 10 }, (_, i) => ({
+  id: `class_${i + 1}`,
+  name: `2학년 ${i + 1}반 대표 창업팀`,
+  shortName: `${i + 1}반`,
+  totalInvestment: 0,
+  investors: 0
+}));
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [myClass, setMyClass] = useState(null);
+  const [hasVoted, setHasVoted] = useState(false);
+  const [loading, setLoading] = useState(true);
+  
+  const [liveTeams, setLiveTeams] = useState(INITIAL_TEAMS);
+  const [allocations, setAllocations] = useState({}); // { 'class_1': 3000000 }
+  
+  const [view, setView] = useState('onboarding'); // onboarding, voting, leaderboard
+  const [errorMsg, setErrorMsg] = useState('');
+
+  // --- Auth & Initial State ---
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth Error:", err);
+      }
+    };
+    initAuth();
+
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setUser(currentUser);
+      if (currentUser) {
+        // Check if user already voted
+        const voteRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'vote_status', 'status');
+        const voteSnap = await getDoc(voteRef);
+        if (voteSnap.exists()) {
+          setHasVoted(true);
+          setMyClass(voteSnap.data().myClass);
+          setView('leaderboard');
+        }
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // --- Live Data Subscription ---
+  useEffect(() => {
+    if (!user) return;
+
+    const q = collection(db, 'artifacts', appId, 'public', 'data', TEAMS_COLLECTION);
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const dbData = {};
+      snapshot.forEach(doc => {
+        dbData[doc.id] = doc.data();
+      });
+
+      const merged = INITIAL_TEAMS.map(team => ({
+        ...team,
+        totalInvestment: dbData[team.id]?.totalInvestment || 0,
+        investors: dbData[team.id]?.investors || 0
+      }));
+
+      // Sort descending by investment amount
+      merged.sort((a, b) => b.totalInvestment - a.totalInvestment);
+      setLiveTeams(merged);
+    }, (error) => {
+      console.error("Firestore Listen Error:", error);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // --- Voting Logic ---
+  const allocatedTotal = Object.values(allocations).reduce((sum, val) => sum + val, 0);
+  const remainingBudget = TOTAL_BUDGET - allocatedTotal;
+  const selectedTeamsCount = Object.keys(allocations).filter(k => allocations[k] > 0).length;
+
+  const handleAllocate = (teamId, amountChange) => {
+    setErrorMsg('');
+    const currentAmount = allocations[teamId] || 0;
+    const newAmount = currentAmount + amountChange;
+
+    // Constraints checks
+    if (newAmount < 0) return;
+    if (amountChange > 0 && remainingBudget < amountChange) {
+      setErrorMsg('예산이 부족합니다.');
+      return;
+    }
+    
+    if (currentAmount === 0 && amountChange > 0 && selectedTeamsCount >= MAX_TEAMS) {
+      setErrorMsg('최대 3팀까지만 투자할 수 있습니다.');
+      return;
+    }
+
+    setAllocations(prev => {
+      const next = { ...prev, [teamId]: newAmount };
+      if (next[teamId] === 0) delete next[teamId];
+      return next;
+    });
+  };
+
+  const submitInvestment = async () => {
+    if (remainingBudget > 0) {
+      setErrorMsg('1,000만 원의 투자금을 모두 사용해야 합니다.');
+      return;
+    }
+    if (selectedTeamsCount !== MAX_TEAMS) {
+       setErrorMsg('반드시 3팀에게 투자해주세요.');
+       return;
+    }
+
+    setLoading(true);
+    try {
+      // 1. Save user vote status (Private)
+      const voteRef = doc(db, 'artifacts', appId, 'users', user.uid, 'vote_status', 'status');
+      await setDoc(voteRef, { 
+        voted: true, 
+        myClass, 
+        timestamp: new Date().toISOString(),
+        allocations 
+      });
+
+      // 2. Update public team totals
+      const promises = Object.entries(allocations).map(([teamId, amount]) => {
+        const teamRef = doc(db, 'artifacts', appId, 'public', 'data', TEAMS_COLLECTION, teamId);
+        return setDoc(teamRef, {
+          totalInvestment: increment(amount),
+          investors: increment(1)
+        }, { merge: true });
+      });
+
+      await Promise.all(promises);
+      
+      setHasVoted(true);
+      setView('leaderboard');
+    } catch (err) {
+      console.error("Submit Error:", err);
+      setErrorMsg('투표 처리 중 오류가 발생했습니다. 다시 시도해주세요.');
+    }
+    setLoading(false);
+  };
+
+  // --- Formatting ---
+  const formatMoney = (amount) => {
+    if (amount === 0) return '0원';
+    return `${(amount / 10000).toLocaleString()}만 원`;
+  };
+
+  const customFont = (
+    <style>
+      {`
+        @font-face {
+            font-family: 'GmarketSans';
+            src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2001@1.1/GmarketSansMedium.woff') format('woff');
+            font-weight: 400;
+            font-style: normal;
+        }
+        @font-face {
+            font-family: 'GmarketSans';
+            src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2001@1.1/GmarketSansMedium.woff') format('woff');
+            font-weight: 500;
+            font-style: normal;
+        }
+        @font-face {
+            font-family: 'GmarketSans';
+            src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2001@1.1/GmarketSansBold.woff') format('woff');
+            font-weight: 700;
+            font-style: normal;
+        }
+        @font-face {
+            font-family: 'GmarketSans';
+            src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2001@1.1/GmarketSansBold.woff') format('woff');
+            font-weight: 900;
+            font-style: normal;
+        }
+        body, div, span, h1, h2, h3, p, button, input {
+          font-family: 'GmarketSans', sans-serif !important;
+        }
+      `}
+    </style>
+  );
+
+  if (loading) {
+    return (
+      <>
+        {customFont}
+        <div className="min-h-screen flex items-center justify-center bg-[#FDF8E1] font-black text-2xl text-black">🚀 로딩 중... 잠시만 기다려줘!</div>
+      </>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[#FDF8E1] text-slate-900 pb-20 selection:bg-pink-300">
+      {customFont}
+      {/* Header */}
+      <header className="pt-8 pb-6 px-4">
+        <div className="max-w-4xl mx-auto text-center space-y-4">
+          <span className="inline-block bg-black text-yellow-300 text-sm sm:text-base font-black px-5 py-2 rounded-full border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transform -rotate-3 hover:rotate-0 transition-all">
+            🎯 2학년 프로젝트 목표
+          </span>
+          <div>
+            <h2 className="text-base sm:text-lg font-bold text-slate-800 bg-white inline-block px-4 py-1.5 rounded-xl border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] transform rotate-1">
+              "내가 살아가는 사회는 어떤 곳인가"
+            </h2>
+          </div>
+          <h1 className="text-4xl sm:text-5xl md:text-6xl font-black text-black tracking-tighter mt-4 break-keep">
+            🚀 명지동 창업 <span className="text-purple-600 inline-block transform hover:scale-110 transition-transform cursor-pointer">모의투자</span> 페스티벌!
+          </h1>
+        </div>
+      </header>
+
+      <main className="max-w-4xl mx-auto px-4 py-4">
+        
+        {/* VIEW 1: ONBOARDING (Select Class) */}
+        {view === 'onboarding' && (
+          <div className="bg-white rounded-3xl border-4 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] p-6 sm:p-10 max-w-2xl mx-auto animate-in zoom-in-95 duration-500">
+            <div className="text-center mb-10">
+              <div className="text-7xl mb-4 animate-bounce">🏫</div>
+              <h2 className="text-3xl sm:text-4xl font-black text-black mb-3">안녕! 넌 몇 반이야?</h2>
+              <p className="text-slate-600 font-bold text-lg">
+                공정한 투표를 위해 본인의 반을 먼저 선택해줘!<br/>
+                <span className="text-pink-600">(우리 반 팀에는 투자할 수 없어 🤫)</span>
+              </p>
+            </div>
+            
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+              {Array.from({ length: 10 }, (_, i) => i + 1).map(num => (
+                <button
+                  key={num}
+                  onClick={() => {
+                    setMyClass(num);
+                    setView('voting');
+                  }}
+                  className="py-5 px-2 bg-yellow-100 hover:bg-yellow-300 border-4 border-black rounded-2xl font-black text-2xl text-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-y-1 hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] transition-all active:scale-95 flex flex-col items-center justify-center gap-1"
+                >
+                  {num}반
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* VIEW 2: VOTING ARENA */}
+        {view === 'voting' && !hasVoted && (
+          <div className="space-y-8 animate-in fade-in duration-500">
+            {/* Dashboard Panel */}
+            <div className="bg-purple-500 rounded-3xl border-4 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] p-6 sm:p-8 text-white sticky top-4 z-20 transform -rotate-1">
+              <div className="flex flex-col sm:flex-row justify-between items-center gap-6">
+                <div className="text-center sm:text-left">
+                  <h3 className="text-yellow-300 text-lg font-black mb-1 drop-shadow-sm">나의 투자 지갑 👛 (소속: {myClass}반)</h3>
+                  <div className="flex items-end justify-center sm:justify-start gap-2">
+                    <span className="text-4xl sm:text-5xl font-black drop-shadow-md">{formatMoney(remainingBudget)}</span>
+                    <span className="text-purple-200 font-bold mb-1 sm:mb-2 text-xl">남음</span>
+                  </div>
+                </div>
+                
+                <div className="flex gap-3 w-full sm:w-auto">
+                  <div className="flex-1 bg-black/20 rounded-2xl p-3 border-2 border-purple-400 text-center">
+                    <div className="text-xs sm:text-sm text-purple-200 font-bold mb-1">총 예산 💰</div>
+                    <div className="font-black text-lg sm:text-xl">{formatMoney(TOTAL_BUDGET)}</div>
+                  </div>
+                  <div className="flex-1 bg-black/20 rounded-2xl p-3 border-2 border-purple-400 text-center">
+                    <div className="text-xs sm:text-sm text-purple-200 font-bold mb-1">선택한 팀 🎯</div>
+                    <div className="font-black text-lg sm:text-xl text-yellow-300">{selectedTeamsCount} / {MAX_TEAMS}팀</div>
+                  </div>
+                </div>
+              </div>
+
+              {errorMsg && (
+                <div className="mt-6 bg-pink-500 text-white border-4 border-black rounded-xl p-3 sm:p-4 text-sm sm:text-base font-bold flex items-center justify-center gap-2 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] animate-pulse">
+                  <AlertCircle size={24} />
+                  {errorMsg}
+                </div>
+              )}
+            </div>
+
+            {/* Teams Grid */}
+            <div className="grid sm:grid-cols-2 gap-5 sm:gap-6">
+              {INITIAL_TEAMS.filter(team => team.id !== `class_${myClass}`).map((team) => {
+                const currentAllocation = allocations[team.id] || 0;
+                const isSelected = currentAllocation > 0;
+
+                return (
+                  <div key={team.id} className={`bg-white rounded-3xl border-4 border-black transition-all p-5 sm:p-6 ${isSelected ? 'shadow-[8px_8px_0px_0px_rgba(236,72,153,1)] scale-[1.02] bg-pink-50 ring-4 ring-pink-400 ring-offset-2' : 'shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]'}`}>
+                    <div className="flex justify-between items-start mb-6">
+                      <div>
+                        <span className="inline-block bg-black text-white text-xs sm:text-sm font-black px-3 py-1 rounded-full mb-3 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)]">
+                          {team.shortName}
+                        </span>
+                        <h3 className="text-xl sm:text-2xl font-black text-black leading-tight">{team.name}</h3>
+                      </div>
+                      {isSelected && <div className="text-3xl animate-bounce">💖</div>}
+                    </div>
+                    
+                    <div className="flex items-center justify-between bg-slate-100 p-3 rounded-2xl border-4 border-black shadow-inner">
+                      <button 
+                        onClick={() => handleAllocate(team.id, -UNIT)}
+                        disabled={currentAllocation === 0}
+                        className="w-12 h-12 rounded-xl bg-cyan-400 border-4 border-black text-black flex items-center justify-center hover:bg-cyan-300 disabled:opacity-50 disabled:grayscale transition-all font-black text-3xl shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:scale-90"
+                      >
+                        -
+                      </button>
+                      <div className="text-center px-2 flex-1">
+                        <div className="text-xs sm:text-sm font-bold text-slate-500 mb-1">투자금액</div>
+                        <div className={`font-black text-2xl sm:text-3xl ${isSelected ? 'text-pink-600' : 'text-slate-400'}`}>
+                          {formatMoney(currentAllocation)}
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => handleAllocate(team.id, UNIT)}
+                        disabled={remainingBudget === 0 || (currentAllocation === 0 && selectedTeamsCount >= MAX_TEAMS)}
+                        className="w-12 h-12 rounded-xl bg-pink-400 border-4 border-black text-black flex items-center justify-center hover:bg-pink-300 disabled:opacity-50 disabled:grayscale transition-all font-black text-3xl shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:scale-90"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Submit Button */}
+            <div className="fixed bottom-4 left-4 right-4 z-50 sm:static sm:mt-10">
+              <div className="max-w-4xl mx-auto">
+                <button
+                  onClick={submitInvestment}
+                  disabled={loading}
+                  className="w-full bg-green-400 hover:bg-green-500 text-black font-black text-xl sm:text-2xl py-5 rounded-2xl border-4 border-black shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] hover:translate-y-1 hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all active:scale-[0.98] disabled:opacity-70 disabled:cursor-wait flex items-center justify-center gap-3 group"
+                >
+                  {loading ? '🚀 투자 전송 중...' : '🔥 투표 확정하기 (실시간 반영) 🔥'}
+                </button>
+                <p className="text-center font-bold text-slate-500 mt-4 hidden sm:block bg-white/50 py-2 rounded-xl border-2 border-dashed border-slate-300">
+                  ⚠️ 투표는 한 번만 가능! 1,000만원을 모두 소진하여 반드시 3팀에 투자해야 해.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* VIEW 3: LEADERBOARD */}
+        {view === 'leaderboard' && (
+          <div className="space-y-8 animate-in zoom-in-95 duration-500">
+            
+            {!hasVoted && (
+              <div className="flex justify-center sm:justify-end mb-6">
+                <button 
+                  onClick={() => setView('onboarding')}
+                  className="bg-white border-4 border-black px-6 py-3 rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] font-black text-lg flex items-center gap-2 transition-all active:scale-95"
+                >
+                  👈 투표하러 가기
+                </button>
+              </div>
+            )}
+
+            {hasVoted && (
+              <div className="bg-green-400 border-4 border-black text-black rounded-3xl p-6 flex flex-col sm:flex-row items-center justify-center gap-4 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] mb-10 text-center sm:text-left transform -rotate-1">
+                <div className="text-5xl animate-bounce">🎉</div>
+                <div>
+                  <h3 className="font-black text-2xl sm:text-3xl mb-1">성공적으로 투자했어!</h3>
+                  <p className="font-bold text-black/70 text-lg">이제 실시간으로 순위가 바뀌는 걸 구경해보자 팝콘 준비 🍿</p>
+                </div>
+              </div>
+            )}
+
+            <div className="text-center space-y-3 mb-10">
+              <h2 className="text-4xl sm:text-5xl font-black text-black flex items-center justify-center gap-3">
+                <span className="text-5xl">🔥</span> 실시간 랭킹보드 <span className="text-5xl">🔥</span>
+              </h2>
+              <p className="font-bold text-slate-600 text-lg bg-white inline-block px-4 py-1.5 rounded-xl border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] transform rotate-1">
+                어느 팀이 가장 높은 투자를 받았을까?
+              </p>
+            </div>
+
+            {/* Podium Grid */}
+            <div className="grid gap-5">
+              {liveTeams.map((team, index) => {
+                let rankStyle = "bg-white border-4 border-black";
+                let rankIcon = null;
+                let rankTextSize = "text-xl";
+                
+                if (index === 0) {
+                  rankStyle = "bg-yellow-300 border-4 border-black ring-4 ring-yellow-400 ring-offset-2 transform scale-[1.02] sm:scale-[1.05] z-10 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]";
+                  rankIcon = <span className="text-5xl drop-shadow-md">👑</span>;
+                  rankTextSize = "text-3xl";
+                } else if (index === 1) {
+                  rankStyle = "bg-slate-200 border-4 border-black shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]";
+                  rankIcon = <span className="text-4xl">🥈</span>;
+                  rankTextSize = "text-2xl";
+                } else if (index === 2) {
+                  rankStyle = "bg-orange-300 border-4 border-black shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]";
+                  rankIcon = <span className="text-4xl">🥉</span>;
+                  rankTextSize = "text-2xl";
+                } else {
+                   rankStyle = "bg-white border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]";
+                }
+
+                // Calculate progress bar percentage (relative to top team)
+                const maxInvestment = liveTeams[0]?.totalInvestment || 1;
+                const percentage = Math.max(0, (team.totalInvestment / maxInvestment) * 100);
+
+                return (
+                  <div key={team.id} className={`rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row items-center gap-4 transition-all hover:-translate-y-1 ${rankStyle}`}>
+                    <div className="w-16 h-16 sm:w-20 sm:h-20 bg-white border-4 border-black rounded-2xl flex items-center justify-center flex-shrink-0 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+                      {rankIcon ? rankIcon : <span className="text-3xl font-black text-slate-400">{index + 1}</span>}
+                    </div>
+                    
+                    <div className="flex-1 min-w-0 w-full">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4 mb-3 text-center sm:text-left">
+                        <h3 className={`font-black text-black truncate ${rankTextSize}`}>{team.name}</h3>
+                        <div className="text-right">
+                          <span className="font-black text-2xl sm:text-4xl text-black tracking-tight drop-shadow-sm">
+                            {formatMoney(team.totalInvestment)}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      {/* Progress bar */}
+                      <div className="w-full bg-black/10 rounded-full h-4 overflow-hidden border-2 border-black/20">
+                        <div 
+                          className={`h-4 rounded-full transition-all duration-1000 ease-out border-r-2 border-black/20 ${index === 0 ? 'bg-pink-400' : index === 1 ? 'bg-cyan-400' : index === 2 ? 'bg-green-400' : 'bg-purple-400'}`}
+                          style={{ width: `${percentage}%` }}
+                        ></div>
+                      </div>
+                      <div className="text-sm font-bold text-black/60 mt-2 flex items-center justify-center sm:justify-start gap-1">
+                        <Users size={16} /> {team.investors}명의 친구들이 투자함!
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
