@@ -243,11 +243,6 @@
                                 </div>
                             </div>
                         </div>
-                        ${state.errorMsg ? `
-                        <div class="mt-6 bg-pink-500 text-white border-4 border-black rounded-xl p-3 sm:p-4 text-sm sm:text-base font-bold flex items-center justify-center gap-2 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] animate-pulse">
-                            ⚠️ ${state.errorMsg}
-                        </div>
-                        ` : ''}
                     </div>
 
                     <!-- Teams Grid -->
@@ -257,7 +252,12 @@
 
                     <!-- Submit Button -->
                     <div class="fixed bottom-4 left-4 right-4 z-50 sm:static sm:mt-10">
-                        <div class="max-w-4xl mx-auto">
+                        <div class="max-w-4xl mx-auto flex flex-col gap-2 sm:gap-3">
+                            ${state.errorMsg ? `
+                            <div class="bg-pink-500 text-white border-4 border-black rounded-xl p-3 sm:p-4 text-sm sm:text-base font-bold flex items-center justify-center gap-2 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] animate-bounce">
+                                ⚠️ ${state.errorMsg}
+                            </div>
+                            ` : ''}
                             <button
                                 onclick="window.submitInvestment()"
                                 ${state.isSubmitting ? 'disabled' : ''}
@@ -415,7 +415,7 @@
             const remainingBudget = TOTAL_BUDGET - allocatedTotal;
             const selectedTeamsCount = allocatedValues.filter(val => val > 0).length;
 
-            if (remainingBudget > 0) {
+            if (remainingBudget !== 0) {
                 state.errorMsg = '1,000만 원의 투자금을 모두 사용해야 합니다.';
                 render();
                 return;
