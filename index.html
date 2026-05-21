@@ -83,7 +83,7 @@
 
         // =========================================================================
         // 🚨 필수 수정 🚨: GitHub Pages 배포를 위해 본인의 Firebase 설정값으로 변경해주세요!
-        // Firebase 콘솔 -> 프로젝트 설정 -> 내 앱 -> SDK 설정 및 구성에서 확인 가능
+        // Firebase 콘솔 -> 프로젝트 설정 -> 일반 -> 내 앱 (SDK 설정 및 구성)
         // =========================================================================
         const myFirebaseConfig = {
             apiKey: "여기에_API_KEY를_붙여넣으세요",
@@ -265,14 +265,14 @@
                         ${teamsHtml}
                     </div>
 
-                    <!-- Submit Button -->
+                    <!-- Submit Button Error Message Position Fix -->
                     <div class="fixed bottom-4 left-4 right-4 z-50 sm:static sm:mt-10">
-                        <!-- 버튼 위에 에러 메시지가 표시되도록 flex-col 컨테이너 사용 -->
+                        <!-- flex-col을 사용하여 에러메시지가 위로, 버튼이 아래로 쌓이게 함 -->
                         <div class="max-w-4xl mx-auto flex flex-col gap-2 sm:gap-3">
                             
                             ${state.errorMsg ? `
-                            <div class="bg-pink-500 text-white border-4 border-black rounded-xl p-3 sm:p-4 text-sm sm:text-base font-bold flex items-center justify-center gap-2 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] animate-bounce">
-                                ⚠️ ${state.errorMsg}
+                            <div class="bg-pink-500 text-white border-4 border-black rounded-xl p-3 sm:p-4 text-sm sm:text-base font-bold flex items-center justify-center gap-2 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] animate-bounce break-words text-center">
+                                ${state.errorMsg}
                             </div>
                             ` : ''}
 
@@ -281,9 +281,9 @@
                                 ${state.isSubmitting ? 'disabled' : ''}
                                 class="w-full bg-green-400 hover:bg-green-500 text-black font-black text-xl sm:text-2xl py-5 rounded-2xl border-4 border-black shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] hover:translate-y-1 hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all active:scale-[0.98] disabled:opacity-70 disabled:cursor-wait flex items-center justify-center gap-3 group"
                             >
-                                ${state.isSubmitting ? '🚀 투자 전송 중...' : '🔥 투표 확정하기 (실시간 반영) 🔥'}
+                                ${state.isSubmitting ? '🚀 데이터 저장 중...' : '🔥 투표 확정하기 (실시간 반영) 🔥'}
                             </button>
-                            <p class="text-center font-bold text-slate-500 mt-2 hidden sm:block bg-white/50 py-2 rounded-xl border-2 border-dashed border-slate-300">
+                            <p class="text-center font-bold text-slate-500 mt-1 hidden sm:block bg-white/50 py-2 rounded-xl border-2 border-dashed border-slate-300">
                                 ⚠️ 투표는 한 번만 가능! 1,000만원을 모두 소진하여 반드시 3팀에 투자해야 해.
                             </p>
                         </div>
@@ -410,12 +410,12 @@
 
             if (newAmount < 0) return;
             if (amountChange > 0 && remainingBudget < amountChange) {
-                state.errorMsg = '예산이 부족합니다.';
+                state.errorMsg = '⚠️ 예산이 부족합니다.';
                 render();
                 return;
             }
             if (currentAmount === 0 && amountChange > 0 && selectedTeamsCount >= MAX_TEAMS) {
-                state.errorMsg = '최대 3팀까지만 투자할 수 있습니다.';
+                state.errorMsg = '⚠️ 최대 3팀까지만 투자할 수 있습니다.';
                 render();
                 return;
             }
@@ -434,12 +434,12 @@
             const selectedTeamsCount = allocatedValues.filter(val => val > 0).length;
 
             if (remainingBudget !== 0) {
-                state.errorMsg = '1,000만 원의 투자금을 모두 사용해야 합니다.';
+                state.errorMsg = '⚠️ 1,000만 원의 투자금을 모두 사용해야 합니다.';
                 render();
                 return;
             }
             if (selectedTeamsCount !== MAX_TEAMS) {
-                state.errorMsg = '반드시 3팀에게 투자해주세요.';
+                state.errorMsg = '⚠️ 반드시 3팀에게 투자해주세요.';
                 render();
                 return;
             }
@@ -472,7 +472,8 @@
                 state.view = 'leaderboard';
             } catch (err) {
                 console.error("Submit Error:", err);
-                state.errorMsg = '투표 처리 중 오류가 발생했습니다. 다시 시도해주세요.';
+                // 🚀 Firebase Rules 에러인지 확인하기 위해 원인을 화면에 직접 출력합니다!
+                state.errorMsg = `🚫 투표 저장 실패: ${err.message}. (Firebase 콘솔의 Firestore 데이터베이스 '규칙(Rules)' 설정을 확인해주세요!)`;
             }
             
             state.isSubmitting = false;
@@ -490,7 +491,6 @@
                 }
             } catch (err) {
                 console.error("Auth Error:", err);
-                // 에러 발생시 로딩 해제 및 알림
                 state.loading = false;
                 document.getElementById('loading-screen').innerHTML = `<div class="text-red-500 font-bold p-4 text-center">Firebase 연결 오류!<br/>API 키 설정을 확인하거나 익명 로그인이 활성화되었는지 확인하세요.</div>`;
             }
@@ -498,36 +498,44 @@
             onAuthStateChanged(auth, async (currentUser) => {
                 state.user = currentUser;
                 if (currentUser) {
-                    const voteRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'vote_status', 'status');
-                    const voteSnap = await getDoc(voteRef);
-                    if (voteSnap.exists()) {
-                        state.hasVoted = true;
-                        state.myClass = voteSnap.data().myClass;
-                        state.view = 'leaderboard';
+                    try {
+                        const voteRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'vote_status', 'status');
+                        const voteSnap = await getDoc(voteRef);
+                        if (voteSnap.exists()) {
+                            state.hasVoted = true;
+                            state.myClass = voteSnap.data().myClass;
+                            state.view = 'leaderboard';
+                        }
+                    } catch (err) {
+                        console.error("Fetch User Vote Error:", err);
                     }
 
                     // Setup realtime listener for teams
-                    const q = collection(db, 'artifacts', appId, 'public', 'data', TEAMS_COLLECTION);
-                    onSnapshot(q, (snapshot) => {
-                        const dbData = {};
-                        snapshot.forEach(doc => {
-                            dbData[doc.id] = doc.data();
+                    try {
+                        const q = collection(db, 'artifacts', appId, 'public', 'data', TEAMS_COLLECTION);
+                        onSnapshot(q, (snapshot) => {
+                            const dbData = {};
+                            snapshot.forEach(doc => {
+                                dbData[doc.id] = doc.data();
+                            });
+
+                            const merged = INITIAL_TEAMS.map(team => ({
+                                ...team,
+                                totalInvestment: dbData[team.id]?.totalInvestment || 0,
+                                investors: dbData[team.id]?.investors || 0
+                            }));
+
+                            merged.sort((a, b) => b.totalInvestment - a.totalInvestment);
+                            state.liveTeams = merged;
+                            
+                            // Re-render if leaderboard is active to show live updates
+                            if (state.view === 'leaderboard') render();
+                        }, (error) => {
+                            console.error("Firestore Listen Error:", error);
                         });
-
-                        const merged = INITIAL_TEAMS.map(team => ({
-                            ...team,
-                            totalInvestment: dbData[team.id]?.totalInvestment || 0,
-                            investors: dbData[team.id]?.investors || 0
-                        }));
-
-                        merged.sort((a, b) => b.totalInvestment - a.totalInvestment);
-                        state.liveTeams = merged;
-                        
-                        // Re-render if leaderboard is active to show live updates
-                        if (state.view === 'leaderboard') render();
-                    }, (error) => {
-                        console.error("Firestore Listen Error:", error);
-                    });
+                    } catch (err) {
+                         console.error("Setup Snapshot Error:", err);
+                    }
                 }
                 
                 state.loading = false;
