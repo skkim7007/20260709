@@ -32,6 +32,7 @@
       myClass: null,
       investments: {},
       globalTotals: {},
+      votedClasses: {},
       loading: true,
       errorMsg: null,
       pollingInterval: null,
@@ -43,6 +44,14 @@
     const TEAMS = Array.from({ length: 10 }, (_, i) => ({ id: i + 1, name: `${i + 1}반` }));
     const TOTAL_BUDGET = 10000000;
     const UNIT = 1000000;
+
+    function emptyVotedClasses() {
+      const votedClasses = {};
+      for (let i = 1; i <= 10; i++) {
+        votedClasses[String(i)] = false;
+      }
+      return votedClasses;
+    }
 
     async function loadGlobalTotals() {
       try {
@@ -60,6 +69,7 @@
         const data = await res.json();
 
         state.globalTotals = data.totals || {};
+        state.votedClasses = data.votedClasses || emptyVotedClasses();
         state.status = data.status || "OPEN";
 
         if (data.resetAt) {
@@ -95,15 +105,16 @@
         }
       }
 
-      // 주소로 처음 들어오면 항상 초기 화면이 뜨도록 고정
+      // 주소로 들어오면 항상 초기 화면
       state.step = "intro";
 
       state.loading = false;
       render();
 
       state.pollingInterval = setInterval(async () => {
-        if (state.step === "result" || state.status === "CLOSED") {
-          await loadGlobalTotals();
+        await loadGlobalTotals();
+
+        if (state.step === "intro" || state.step === "result" || state.status === "CLOSED") {
           render();
         }
       }, 5000);
@@ -130,6 +141,7 @@
       return `[최종 제출 확인]
 
 한 번 제출하면 수정할 수 없습니다.
+또한 한 반은 한 번만 투표할 수 있습니다.
 
 내 소속 반: ${state.myClass}반
 
@@ -141,14 +153,25 @@ ${summaryLines}
 이대로 최종 제출하시겠습니까?`;
     }
 
-    window.handleStart = (classNum) => {
+    window.handleStart = async (classNum) => {
+      await loadGlobalTotals();
+
+      const classKey = String(classNum);
+
       if (state.status === "CLOSED") {
         alert("투표가 이미 마감되었습니다!");
+        render();
+        return;
+      }
+
+      if (state.votedClasses[classKey]) {
+        alert(`${classNum}반은 이미 투표를 완료했습니다. 한 반은 한 번만 투표할 수 있습니다.`);
+        render();
         return;
       }
 
       if (localStorage.getItem("myeongji_my_vote")) {
-        alert("이미 투표를 완료했습니다. 한 번 제출한 투표는 수정할 수 없습니다.");
+        alert("이미 이 기기에서 투표를 완료했습니다. 한 번 제출한 투표는 수정할 수 없습니다.");
         state.step = "result";
         render();
         return;
@@ -188,12 +211,31 @@ ${summaryLines}
     };
 
     window.handleSubmitVote = async () => {
+      await loadGlobalTotals();
+
       const selected = Object.entries(state.investments).filter(([_, amount]) => amount > 0);
       const totalInvested = selected.reduce((sum, [_, amount]) => sum + amount, 0);
       const uniqueAmounts = new Set(selected.map(([_, amount]) => amount));
+      const myClassKey = String(state.myClass);
+
+      if (state.status === "CLOSED") {
+        alert("투표가 이미 마감되었습니다.");
+        state.step = "intro";
+        render();
+        return;
+      }
+
+      if (state.votedClasses[myClassKey]) {
+        alert(`${state.myClass}반은 이미 투표를 완료했습니다. 한 반은 한 번만 투표할 수 있습니다.`);
+        state.step = "intro";
+        state.myClass = null;
+        state.investments = {};
+        render();
+        return;
+      }
 
       if (localStorage.getItem("myeongji_my_vote")) {
-        alert("이미 투표를 완료했습니다. 한 번 제출한 투표는 수정할 수 없습니다.");
+        alert("이미 이 기기에서 투표를 완료했습니다. 한 번 제출한 투표는 수정할 수 없습니다.");
         state.step = "result";
         render();
         return;
@@ -243,7 +285,15 @@ ${summaryLines}
 
         if (result.error) {
           state.errorMsg = result.error;
+          state.globalTotals = result.totals || state.globalTotals;
+          state.votedClasses = result.votedClasses || state.votedClasses;
           alert(result.error);
+
+          if (result.alreadyVotedClass) {
+            state.step = "intro";
+            state.myClass = null;
+            state.investments = {};
+          }
 
         } else if (result.result === "success") {
           localStorage.setItem(
@@ -255,6 +305,7 @@ ${summaryLines}
           );
 
           state.globalTotals = result.totals || {};
+          state.votedClasses = result.votedClasses || emptyVotedClasses();
           state.status = result.status || "OPEN";
           state.step = "result";
 
@@ -281,11 +332,14 @@ ${summaryLines}
       }
     };
 
-    window.adminGoHome = () => {
+    window.adminGoHome = async () => {
+      await loadGlobalTotals();
+
       state.step = "intro";
       state.myClass = null;
       state.investments = {};
       state.errorMsg = null;
+
       render();
     };
 
@@ -316,6 +370,7 @@ ${summaryLines}
         if (cmd === "close") {
           state.status = result.status || "CLOSED";
           state.globalTotals = result.totals || {};
+          state.votedClasses = result.votedClasses || state.votedClasses;
           state.step = "result";
           alert("투표가 마감되었습니다. 최종 결과를 확인합니다.");
 
@@ -324,6 +379,7 @@ ${summaryLines}
           state.myClass = null;
           state.investments = {};
           state.globalTotals = {};
+          state.votedClasses = emptyVotedClasses();
           state.status = "OPEN";
           state.errorMsg = null;
 
@@ -419,15 +475,19 @@ ${summaryLines}
       const isClosed = state.status === "CLOSED";
 
       for (let num = 1; num <= 10; num++) {
+        const classKey = String(num);
+        const hasVoted = !!state.votedClasses[classKey];
+        const disabled = isClosed || hasVoted;
+
         buttonsHtml += `
           <button
-            onclick="${isClosed ? "" : `handleStart(${num})`}"
-            ${isClosed ? "disabled" : ""}
+            onclick="${disabled ? "" : `handleStart(${num})`}"
+            ${disabled ? "disabled" : ""}
             class="py-3 rounded-xl transition-colors font-bold text-lg shadow-sm border border-slate-200
-              ${isClosed
-                ? "bg-slate-200 text-slate-400 cursor-not-allowed opacity-50"
+              ${disabled
+                ? "bg-slate-200 text-slate-400 cursor-not-allowed opacity-60"
                 : "bg-slate-100 hover:bg-blue-100 hover:text-blue-600"}">
-            ${num}반
+            ${num}반${hasVoted ? "<br><span class='text-xs'>투표완료</span>" : ""}
           </button>
         `;
       }
@@ -579,7 +639,7 @@ ${summaryLines}
             <p class="text-base md:text-lg">
               <strong>${state.myClass}반</strong> 소속이시군요! 본인 반에는 투자할 수 없습니다.<br>
               100만원 단위로 분배하여 <strong>정확히 3팀</strong>에게 1,000만원을 투자하되, 1/2/3등을 가릴 수 있도록 <strong>세 팀의 투자 금액은 모두 다르게</strong> 설정해주세요.<br>
-              <span class="text-red-500 font-bold">※ 한 번 제출하면 수정할 수 없습니다.</span>
+              <span class="text-red-500 font-bold">※ 한 번 제출하면 수정할 수 없고, 한 반은 한 번만 투표할 수 있습니다.</span>
             </p>
           </div>
 
