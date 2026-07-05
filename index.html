@@ -3,226 +3,182 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>명지동 창업 아이템 모의 투자 대회</title>
+  <title>명지 창업 아이디어 모의 투자 투표</title>
 
   <script src="https://cdn.tailwindcss.com"></script>
-
   <link href="https://fonts.googleapis.com/css2?family=Jua&display=swap" rel="stylesheet">
-
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
   <style>
     body { font-family: 'Jua', sans-serif; }
-    .glass-panel { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(12px); }
+    .glass-panel { background: rgba(255, 255, 255, 0.94); backdrop-filter: blur(12px); }
     @keyframes shimmer { 100% { transform: translateX(100%); } }
     .animate-shimmer { animation: shimmer 2s infinite; }
-
-    @keyframes countdownPop {
-      0% { transform: scale(0.6); opacity: 0; }
-      35% { transform: scale(1.25); opacity: 1; }
-      100% { transform: scale(1); opacity: 1; }
-    }
-
-    .countdown-pop {
-      animation: countdownPop 0.8s ease-out;
-    }
   </style>
 </head>
-
 <body class="bg-slate-50 text-slate-800 pb-20 min-h-screen">
-
   <div id="app"></div>
 
   <script>
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbxWnUgVH7pJgaA8TaRF_Pvg6tzifWv51jlQbNgrFl_C7KprK9dtqAbMqnpvPxGEuMzB/exec";
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbxduMg1yfs-m06WAOqbI7mTamKN876bNnY3H_mTl9ZTXtYS1iq6YdvDuhH2vE9k0QDJrw/exec";
+
+    const STORAGE_UID = "myeongji_uid";
+    const STORAGE_VOTE = "myeongji_my_vote";
+    const TOTAL_BUDGET = 10000000;
+    const UNIT = 1000000;
+    const TEAMS = Array.from({ length: 10 }, (_, i) => ({ id: i + 1, name: `${i + 1}반` }));
 
     const state = {
-      userId: localStorage.getItem("myeongji_uid") || "user_" + Math.random().toString(36).substr(2, 9),
+      userId: localStorage.getItem(STORAGE_UID) || `user_${Math.random().toString(36).slice(2, 11)}`,
       step: "intro",
       myClass: null,
       investments: {},
       globalTotals: {},
       votedClasses: {},
+      votedClassList: [],
+      voteCount: 0,
+      electionId: null,
       loading: true,
       submitting: false,
       errorMsg: null,
       pollingInterval: null,
       status: "OPEN",
-      adminOpen: false,
-      countdown: 5
+      updatedAt: null,
+      admin: {
+        visible: false,
+        unlocked: false,
+        pin: "",
+        busy: false,
+        message: ""
+      }
     };
 
-    localStorage.setItem("myeongji_uid", state.userId);
-
-    const TEAMS = Array.from({ length: 10 }, (_, i) => ({ id: i + 1, name: `${i + 1}반` }));
-    const TOTAL_BUDGET = 10000000;
-    const UNIT = 1000000;
-
-    function sleep(ms) {
-      return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
-    function emptyVotedClasses() {
-      const votedClasses = {};
-      for (let i = 1; i <= 10; i++) {
-        votedClasses[String(i)] = false;
-      }
-      return votedClasses;
-    }
-
-    async function loadGlobalTotals() {
-      try {
-        const urlWithCacheBuster = GAS_URL + "?t=" + new Date().getTime();
-
-        const res = await fetch(urlWithCacheBuster, {
-          method: "GET",
-          cache: "no-store"
-        });
-
-        if (!res.ok) {
-          throw new Error("서버 응답 오류");
-        }
-
-        const data = await res.json();
-
-        state.globalTotals = data.totals || {};
-        state.votedClasses = data.votedClasses || emptyVotedClasses();
-        state.status = data.status || "OPEN";
-
-        if (data.resetAt) {
-          const localResetAt = localStorage.getItem("myeongji_reset_at");
-
-          if (localResetAt !== data.resetAt) {
-            localStorage.setItem("myeongji_reset_at", data.resetAt);
-            localStorage.removeItem("myeongji_my_vote");
-            state.investments = {};
-            state.myClass = null;
-          }
-        }
-
-      } catch (e) {
-        console.error("데이터 로드 실패:", e);
-        state.errorMsg = "결과 데이터를 불러오지 못했습니다. Apps Script 웹앱 URL 또는 새 버전 배포 여부를 확인해주세요.";
-      }
-    }
+    localStorage.setItem(STORAGE_UID, state.userId);
 
     async function init() {
-      await loadGlobalTotals();
+      await loadGlobalState();
+      restoreSavedVote();
 
-      const savedVote = localStorage.getItem("myeongji_my_vote");
-
-      if (savedVote) {
-        try {
-          const parsed = JSON.parse(savedVote);
-          state.myClass = parsed.myClass;
-          state.investments = parsed.investments || {};
-        } catch (e) {
-          state.myClass = null;
-          state.investments = {};
-        }
-      }
-
-      state.step = "intro";
       state.loading = false;
       render();
 
       state.pollingInterval = setInterval(async () => {
-        if (state.step === "vote" || state.step === "countdown" || state.submitting) return;
-
-        await loadGlobalTotals();
-
-        if (state.step === "intro" || state.step === "complete") {
-          render();
-        }
+        await loadGlobalState();
+        render();
       }, 5000);
     }
 
+    async function loadGlobalState() {
+      try {
+        const res = await fetch(`${GAS_URL}?t=${Date.now()}`);
+        if (!res.ok) throw new Error("서버 응답이 올바르지 않습니다.");
+
+        const data = await res.json();
+        applyServerState(data);
+      } catch (error) {
+        console.error("데이터 로드 실패:", error);
+      }
+    }
+
+    function applyServerState(data) {
+      const serverState = data.state || data;
+      state.globalTotals = serverState.totals || {};
+      state.votedClasses = serverState.votedClasses || {};
+      state.votedClassList = serverState.votedClassList || [];
+      state.voteCount = Number(serverState.voteCount || 0);
+      state.status = serverState.status || "OPEN";
+      state.electionId = serverState.electionId || null;
+      state.updatedAt = serverState.updatedAt || null;
+    }
+
+    function restoreSavedVote() {
+      const savedVote = localStorage.getItem(STORAGE_VOTE);
+      if (!savedVote) return;
+
+      try {
+        const parsed = JSON.parse(savedVote);
+        if (parsed.electionId !== state.electionId) {
+          localStorage.removeItem(STORAGE_VOTE);
+          return;
+        }
+
+        state.myClass = Number(parsed.myClass);
+        state.investments = parsed.investments || {};
+        state.step = "result";
+      } catch (error) {
+        localStorage.removeItem(STORAGE_VOTE);
+      }
+    }
+
     window.formatMoney = (num) => {
-      if (!num) return "0원";
-      return `${(num / 10000).toLocaleString()}만원`;
+      const amount = Number(num || 0);
+      if (!amount) return "0원";
+      return `${(amount / 10000).toLocaleString()}만원`;
     };
 
-    function buildVoteSummaryMessage() {
-      const selected = Object.entries(state.investments)
-        .filter(([_, amount]) => amount > 0)
-        .sort((a, b) => b[1] - a[1]);
+    function getSelectedInvestments() {
+      return Object.fromEntries(
+        Object.entries(state.investments).filter(([, amount]) => Number(amount) > 0)
+      );
+    }
 
-      const summaryLines = selected
-        .map(([classId, amount], index) => {
-          return `${index + 1}순위: ${classId}반 - ${window.formatMoney(amount)}`;
-        })
-        .join("\n");
-
-      const totalInvested = selected.reduce((sum, [_, amount]) => sum + amount, 0);
-
-      return `[최종 제출 확인]
-
-한 번 제출하면 수정할 수 없습니다.
-또한 한 반은 한 번만 투표할 수 있습니다.
-
-내 소속 반: ${state.myClass}반
-
-투표 내용:
-${summaryLines}
-
-총 투자금: ${window.formatMoney(totalInvested)}
-
-이대로 최종 제출하시겠습니까?`;
+    function classHasVoted(classNum) {
+      return Boolean(state.votedClasses[String(classNum)] || state.votedClasses[classNum]);
     }
 
     window.handleStart = (classNum) => {
-      const classKey = String(classNum);
-
       if (state.status === "CLOSED") {
-        alert("투표가 이미 마감되었습니다!");
-        render();
+        alert("투표가 이미 마감되었습니다.");
         return;
       }
 
-      if (state.votedClasses[classKey]) {
-        alert(`${classNum}반은 이미 투표를 완료했습니다. 한 반은 한 번만 투표할 수 있습니다.`);
-        render();
-        return;
-      }
-
-      if (localStorage.getItem("myeongji_my_vote")) {
-        alert("이미 이 기기에서 투표를 완료했습니다. 한 번 제출한 투표는 수정할 수 없습니다.");
-        state.step = "complete";
-        render();
+      if (classHasVoted(classNum)) {
+        alert(`${classNum}반은 이미 투표를 완료했습니다.`);
         return;
       }
 
       state.myClass = classNum;
       state.investments = {};
+      state.errorMsg = null;
       state.step = "vote";
       render();
     };
 
     window.goBackToIntro = () => {
       state.step = "intro";
-      state.myClass = null;
       state.investments = {};
+      state.errorMsg = null;
       render();
+    };
 
-      loadGlobalTotals().then(() => {
-        render();
-      });
+    window.goToEdit = () => {
+      if (state.status === "CLOSED") {
+        alert("투표가 마감되어 수정할 수 없습니다.");
+        return;
+      }
+      state.errorMsg = null;
+      state.step = "vote";
+      render();
     };
 
     window.handleInvest = (teamId, amount) => {
-      const current = state.investments[teamId] || 0;
-      const newValue = current + amount;
+      if (teamId === state.myClass) return;
 
+      const current = Number(state.investments[teamId] || 0);
+      const newValue = current + amount;
       if (newValue < 0) return;
 
-      const isNewInvestment = current === 0 && amount > 0;
-      const investedTeamsCount = Object.values(state.investments).filter(v => v > 0).length;
+      const tempInvestments = { ...state.investments };
+      if (newValue === 0) {
+        delete tempInvestments[teamId];
+      } else {
+        tempInvestments[teamId] = newValue;
+      }
 
-      if (isNewInvestment && investedTeamsCount >= 3) return;
+      const investedTeamsCount = Object.values(tempInvestments).filter((value) => value > 0).length;
+      if (investedTeamsCount > 3) return;
 
-      const tempInvestments = { ...state.investments, [teamId]: newValue };
-      const totalInvested = Object.values(tempInvestments).reduce((a, b) => a + b, 0);
-
+      const totalInvested = Object.values(tempInvestments).reduce((a, b) => a + Number(b), 0);
       if (totalInvested > TOTAL_BUDGET) return;
 
       state.investments = tempInvestments;
@@ -230,59 +186,7 @@ ${summaryLines}
     };
 
     window.handleSubmitVote = async () => {
-      if (state.submitting) return;
-
-      const selected = Object.entries(state.investments).filter(([_, amount]) => amount > 0);
-      const totalInvested = selected.reduce((sum, [_, amount]) => sum + amount, 0);
-      const uniqueAmounts = new Set(selected.map(([_, amount]) => amount));
-      const myClassKey = String(state.myClass);
-
-      if (state.status === "CLOSED") {
-        alert("투표가 이미 마감되었습니다.");
-        state.step = "intro";
-        render();
-        return;
-      }
-
-      if (state.votedClasses[myClassKey]) {
-        alert(`${state.myClass}반은 이미 투표를 완료했습니다. 한 반은 한 번만 투표할 수 있습니다.`);
-        state.step = "intro";
-        state.myClass = null;
-        state.investments = {};
-        render();
-        return;
-      }
-
-      if (localStorage.getItem("myeongji_my_vote")) {
-        alert("이미 이 기기에서 투표를 완료했습니다. 한 번 제출한 투표는 수정할 수 없습니다.");
-        state.step = "complete";
-        render();
-        return;
-      }
-
-      if (selected.length !== 3) {
-        alert("정확히 3개의 반에 투자해야 합니다.");
-        return;
-      }
-
-      if (totalInvested !== TOTAL_BUDGET) {
-        alert("1,000만원을 모두 사용해야 합니다.");
-        return;
-      }
-
-      if (uniqueAmounts.size !== selected.length) {
-        alert("세 팀의 투자 금액은 모두 달라야 합니다.");
-        return;
-      }
-
-      const confirmed = confirm(buildVoteSummaryMessage());
-
-      if (!confirmed) {
-        return;
-      }
-
       state.submitting = true;
-      state.loading = true;
       state.errorMsg = null;
       render();
 
@@ -291,166 +195,141 @@ ${summaryLines}
           action: "vote",
           userId: state.userId,
           myClass: state.myClass,
-          investments: state.investments
+          investments: getSelectedInvestments()
         };
 
         const res = await fetch(GAS_URL, {
           method: "POST",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify(payload),
-          cache: "no-store"
+          body: JSON.stringify(payload)
         });
 
         const result = await res.json();
 
-        if (result.error) {
-          state.errorMsg = result.error;
-          state.globalTotals = result.totals || state.globalTotals;
-          state.votedClasses = result.votedClasses || state.votedClasses;
-          alert(result.error);
-
-          if (result.alreadyVotedClass) {
-            state.step = "intro";
-            state.myClass = null;
-            state.investments = {};
-          }
-
-        } else if (result.result === "success") {
-          localStorage.setItem(
-            "myeongji_my_vote",
-            JSON.stringify({
-              myClass: state.myClass,
-              investments: state.investments
-            })
-          );
-
-          state.globalTotals = result.totals || {};
-          state.votedClasses = result.votedClasses || emptyVotedClasses();
-          state.votedClasses[String(state.myClass)] = true;
-          state.status = result.status || "OPEN";
-          state.step = "complete";
-
-          alert("투표가 최종 제출되었습니다.");
+        if (result.state) {
+          applyServerState(result.state);
         }
 
-      } catch (err) {
-        state.errorMsg = "네트워크 오류가 발생했습니다. Apps Script 웹앱 URL 또는 새 버전 배포 여부를 확인해주세요.";
+        if (result.error) {
+          state.errorMsg = result.error;
+          await loadGlobalState();
+          return;
+        }
 
+        if (result.result === "success") {
+          localStorage.setItem(STORAGE_VOTE, JSON.stringify({
+            electionId: result.electionId || state.electionId,
+            myClass: state.myClass,
+            investments: getSelectedInvestments()
+          }));
+
+          await loadGlobalState();
+          state.step = "result";
+        }
+      } catch (error) {
+        state.errorMsg = "네트워크 오류가 발생했습니다. 잠시 뒤 다시 시도해주세요.";
       } finally {
         state.submitting = false;
-        state.loading = false;
         render();
       }
     };
 
     window.toggleAdmin = () => {
-      if (state.adminOpen) {
-        state.adminOpen = false;
+      state.admin.visible = !state.admin.visible;
+      state.admin.message = "";
+      render();
+    };
+
+    window.updateAdminPin = (value) => {
+      state.admin.pin = value;
+    };
+
+    window.adminUnlock = async () => {
+      if (!state.admin.pin.trim()) {
+        state.admin.message = "비밀번호를 입력해주세요.";
         render();
         return;
       }
 
-      const p = prompt("관리자 비밀번호를 입력하세요");
-
-      if (p === "1700") {
-        state.adminOpen = true;
-        render();
-      } else if (p) {
-        alert("비밀번호가 틀렸습니다.");
-      }
-    };
-
-    window.adminGoHome = () => {
-      state.step = "intro";
-      state.myClass = null;
-      state.investments = {};
-      state.errorMsg = null;
-      state.adminOpen = true;
-      render();
-
-      loadGlobalTotals().then(() => {
-        state.adminOpen = true;
-        render();
-      });
-    };
-
-    async function runCountdownThenShowResult() {
-      state.loading = false;
-      state.step = "countdown";
-      state.adminOpen = false;
-
-      for (let i = 5; i >= 1; i--) {
-        state.countdown = i;
-        render();
-        await sleep(1000);
-      }
-
-      state.step = "result";
-      state.adminOpen = true;
-      render();
-    }
-
-    window.adminCommand = async (cmd) => {
-      const confirmMsg = cmd === "close"
-        ? "투표를 마감하고 최종 결과를 확인하시겠습니까?"
-        : cmd === "reset"
-          ? "구글 시트의 모든 투표 데이터를 삭제하고 초기화하시겠습니까? (복구 불가)"
-          : "";
-
-      if (!confirm(confirmMsg)) return;
-
-      state.loading = true;
-      state.adminOpen = true;
+      state.admin.busy = true;
+      state.admin.message = "";
       render();
 
       try {
-        const response = await fetch(GAS_URL, {
-          method: "POST",
-          headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify({ action: "admin", cmd: cmd }),
-          cache: "no-store"
-        });
-
-        const result = await response.json();
-
+        const result = await postAdminCommand("status");
         if (result.error) throw new Error(result.error);
 
-        if (cmd === "close") {
-          state.status = result.status || "CLOSED";
-          state.globalTotals = result.totals || {};
-          state.votedClasses = result.votedClasses || state.votedClasses;
+        state.admin.unlocked = true;
+        state.admin.message = "관리자 모드가 열렸습니다.";
+        if (result.state) applyServerState(result.state);
+      } catch (error) {
+        state.admin.unlocked = false;
+        state.admin.message = error.message || "관리자 인증에 실패했습니다.";
+      } finally {
+        state.admin.busy = false;
+        render();
+      }
+    };
 
-          await runCountdownThenShowResult();
+    window.adminCommand = async (cmd) => {
+      const messages = {
+        close: "투표를 마감하고 결과 화면으로 전환할까요?",
+        open: "투표를 다시 열까요?",
+        dedupe: "같은 반의 중복 기록이 있다면 최신 1건만 남길까요?",
+        reset: "모든 투표 데이터를 삭제하고 처음부터 다시 시작할까요? 이 작업은 되돌릴 수 없습니다."
+      };
 
-        } else if (cmd === "reset") {
+      if (!confirm(messages[cmd] || "실행할까요?")) return;
+
+      state.admin.busy = true;
+      state.admin.message = "";
+      render();
+
+      try {
+        const result = await postAdminCommand(cmd);
+        if (result.error) throw new Error(result.error);
+
+        if (result.state) applyServerState(result.state);
+
+        if (cmd === "reset") {
+          localStorage.removeItem(STORAGE_VOTE);
           state.step = "intro";
           state.myClass = null;
           state.investments = {};
-          state.globalTotals = {};
-          state.votedClasses = emptyVotedClasses();
-          state.status = "OPEN";
-          state.errorMsg = null;
-
-          localStorage.removeItem("myeongji_my_vote");
-
-          if (result.resetAt) {
-            localStorage.setItem("myeongji_reset_at", result.resetAt);
-          }
-
-          alert("투표 결과가 리셋되었습니다.");
         }
 
-      } catch (e) {
-        alert("오류 발생: " + e.message);
+        if (cmd === "close") {
+          state.step = "result";
+        }
 
+        const doneText = {
+          close: "투표를 마감했습니다.",
+          open: "투표를 다시 열었습니다.",
+          dedupe: "중복 기록을 정리했습니다.",
+          reset: "투표를 초기화했습니다."
+        };
+        state.admin.message = doneText[cmd] || "처리했습니다.";
+      } catch (error) {
+        state.admin.message = error.message || "처리 중 오류가 발생했습니다.";
       } finally {
-        state.loading = false;
-        if (cmd !== "close") {
-          state.adminOpen = true;
-          render();
-        }
+        state.admin.busy = false;
+        render();
       }
     };
+
+    async function postAdminCommand(cmd) {
+      const response = await fetch(GAS_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          action: "admin",
+          cmd,
+          pin: state.admin.pin
+        })
+      });
+
+      return response.json();
+    }
 
     function render() {
       const appDiv = document.getElementById("app");
@@ -459,8 +338,8 @@ ${summaryLines}
         appDiv.innerHTML = `
           <div class="min-h-screen flex flex-col items-center justify-center bg-slate-50">
             <div class="animate-pulse flex flex-col items-center">
-              <i class="fa-solid fa-wand-magic-sparkles text-5xl mb-4 text-yellow-400"></i>
-              <h2 class="text-4xl font-bold text-blue-600 drop-shadow-sm">데이터 통신중... ✨</h2>
+              <i class="fa-solid fa-chart-simple text-5xl mb-4 text-blue-500"></i>
+              <h2 class="text-3xl font-bold text-blue-600 drop-shadow-sm">데이터를 불러오는 중...</h2>
             </div>
           </div>
         `;
@@ -468,382 +347,321 @@ ${summaryLines}
       }
 
       let html = `
-        <header class="bg-gradient-to-r from-blue-500 to-indigo-500 text-white p-6 shadow-md rounded-b-3xl text-center">
-          <p class="text-sm md:text-base font-light text-blue-100 mb-1 opacity-90">"내가 살아가는 사회는 어떤 곳인가"</p>
+        <header class="bg-gradient-to-r from-blue-500 to-emerald-500 text-white p-6 shadow-md rounded-b-2xl text-center">
+          <p class="text-sm md:text-base font-light text-blue-50 mb-1 opacity-95">"우리 마을에 가장 필요한 창업 아이디어는?"</p>
           <h1 class="text-2xl md:text-4xl font-bold drop-shadow-md flex items-center justify-center gap-3">
-            <i class="fa-solid fa-wand-magic-sparkles text-yellow-300"></i>
-            명지동 창업 아이템 모의 투자 대회
-            <i class="fa-solid fa-wand-magic-sparkles text-yellow-300"></i>
+            <i class="fa-solid fa-chart-simple text-yellow-200"></i>
+            명지 창업 아이디어 모의 투자 투표
           </h1>
         </header>
-
         <main class="max-w-4xl mx-auto mt-8 px-4 relative">
       `;
 
-      if (state.step === "intro") {
-        html += renderIntro();
-      } else if (state.step === "vote") {
-        html += renderVote();
-      } else if (state.step === "complete") {
-        html += renderComplete();
-      } else if (state.step === "countdown") {
-        html += renderCountdown();
-      } else if (state.step === "result") {
-        html += renderResult();
-      }
+      if (state.step === "intro") html += renderIntro();
+      if (state.step === "vote") html += renderVote();
+      if (state.step === "result") html += renderResult();
 
       html += `</main>`;
-
-      html += `
-        <div class="fixed bottom-4 right-4 z-50">
-          <button onclick="toggleAdmin()" class="w-12 h-12 bg-slate-800 text-white rounded-full opacity-20 hover:opacity-100 flex items-center justify-center transition-opacity shadow-lg">
-            <i class="fa-solid fa-gear text-xl"></i>
-          </button>
-        </div>
-
-        <div id="admin-panel" class="${state.adminOpen ? "" : "hidden"} fixed bottom-20 right-4 bg-white border-2 border-slate-800 p-5 rounded-2xl shadow-2xl z-50 w-72 text-left">
-          <h3 class="font-bold text-lg mb-4 text-slate-800">
-            <i class="fa-solid fa-user-tie"></i> 선생님 관리자 메뉴
-          </h3>
-
-          <button onclick="adminGoHome()" class="w-full mb-3 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 rounded-xl font-bold border border-slate-200 transition-colors">
-            <i class="fa-solid fa-house"></i> 홈으로 가기
-          </button>
-
-          <button onclick="adminCommand('close')" class="w-full mb-3 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold animate-pulse shadow-md transition-colors">
-            <i class="fa-solid fa-stopwatch"></i> 투표 마감 및 최종 결과 확인
-          </button>
-
-          <hr class="my-3 border-slate-200">
-
-          <button onclick="adminCommand('reset')" class="w-full bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 py-2.5 rounded-xl font-bold transition-colors">
-            <i class="fa-solid fa-trash-can"></i> 투표 결과 리셋 (초기화)
-          </button>
-        </div>
-      `;
-
+      html += renderAdminPanel();
       appDiv.innerHTML = html;
     }
 
     function renderIntro() {
-      let buttonsHtml = "";
-      const isClosed = state.status === "CLOSED";
-
-      for (let num = 1; num <= 10; num++) {
-        const classKey = String(num);
-        const hasVoted = !!state.votedClasses[classKey];
-        const disabled = isClosed || hasVoted;
-
-        buttonsHtml += `
-          <button
-            onclick="${disabled ? "" : `handleStart(${num})`}"
-            ${disabled ? "disabled" : ""}
-            class="py-3 rounded-xl transition-colors font-bold text-lg shadow-sm border border-slate-200
-              ${disabled
-                ? "bg-slate-200 text-slate-400 cursor-not-allowed opacity-60"
-                : "bg-slate-100 hover:bg-blue-100 hover:text-blue-600"}">
-            ${num}반${hasVoted ? "<br><span class='text-xs'>투표완료</span>" : ""}
-          </button>
-        `;
-      }
-
-      const closedBanner = isClosed ? `
-        <div class="bg-red-100 text-red-600 p-4 rounded-xl mb-6 font-bold text-lg border-2 border-red-200 animate-pulse">
-          🚨 현재 투표가 마감되었습니다! 반 선택 버튼이 비활성화되었습니다. 🚨
+      const closedBanner = state.status === "CLOSED" ? `
+        <div class="bg-red-100 text-red-600 p-4 rounded-lg mb-6 font-bold text-lg border-2 border-red-200">
+          현재 투표가 마감되었습니다.
         </div>
       ` : "";
 
-      const errorHtml = state.errorMsg ? `
-        <div class="bg-red-100 text-red-600 p-3 rounded-xl mb-6 font-bold">
-          ${state.errorMsg}
-        </div>
-      ` : "";
-
-      return `
-        <div class="bg-white rounded-3xl shadow-xl p-8 text-center animate-fade-in">
-          <i class="fa-solid fa-trophy text-6xl text-yellow-400 mb-6 drop-shadow-md block"></i>
-
-          <h2 class="text-3xl mb-4 text-slate-700">우리 동네에 꼭 필요한 사업은 무엇일까?</h2>
-
-          <p class="text-lg text-slate-500 mb-8 leading-relaxed">
-            명지동을 더 살기 좋은 곳으로 만들 톡톡 튀는 창업 아이템들이 모였습니다.<br>
-            여러분에게는 <strong>1,000만원</strong>의 투자금이 주어집니다.<br>
-            우리 지역사회에 가장 큰 도움이 될 것 같은 <span class="text-blue-500">3개의 반</span>을 골라 자유롭게 투자해주세요!
-          </p>
-
-          ${errorHtml}
-          ${closedBanner}
-
-          <div class="max-w-sm mx-auto">
-            <label class="block text-left text-lg mb-2 text-slate-600 flex items-center gap-2">
-              <i class="fa-solid fa-user"></i> 내 소속 반을 선택해주세요
-            </label>
-
-            <div class="grid grid-cols-5 gap-3 mb-6">
-              ${buttonsHtml}
-            </div>
+      const votedSummary = state.votedClassList.length > 0 ? `
+        <div class="mb-6 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg p-4">
+          <div class="font-bold mb-2">투표 완료 반</div>
+          <div class="flex flex-wrap justify-center gap-2">
+            ${state.votedClassList.map((num) => `<span class="px-3 py-1 bg-white rounded-full border border-emerald-100">${num}반</span>`).join("")}
           </div>
         </div>
+      ` : "";
+
+      const buttonsHtml = TEAMS.map((team) => {
+        const alreadyVoted = classHasVoted(team.id);
+        const disabled = state.status === "CLOSED" || alreadyVoted;
+        const buttonClass = disabled
+          ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+          : "bg-white hover:bg-blue-50 hover:text-blue-600 border-slate-200 shadow-sm";
+        const label = alreadyVoted ? `${team.id}반 완료` : `${team.id}반`;
+
+        return `
+          <button
+            onclick="handleStart(${team.id})"
+            ${disabled ? "disabled" : ""}
+            class="min-h-14 py-3 rounded-lg transition-colors font-bold text-base border ${buttonClass}">
+            ${label}
+          </button>
+        `;
+      }).join("");
+
+      return `
+        <section class="bg-white rounded-lg shadow-xl p-6 md:p-8 text-center animate-fade-in">
+          <i class="fa-solid fa-trophy text-6xl text-yellow-400 mb-6 drop-shadow-md block"></i>
+          <h2 class="text-3xl mb-4 text-slate-700">우리 동네를 바꿀 창업 아이디어를 골라주세요</h2>
+          <p class="text-lg text-slate-500 mb-8 leading-relaxed">
+            여러분에게는 <strong>1,000만원</strong>의 투자금이 주어집니다.<br>
+            본인 반을 제외하고 <span class="text-blue-500">정확히 3개 반</span>에 금액을 다르게 나누어 투자해주세요.
+          </p>
+
+          ${closedBanner}
+          ${votedSummary}
+
+          <div class="max-w-md mx-auto">
+            <label class="text-left text-lg mb-3 text-slate-600 flex items-center gap-2">
+              <i class="fa-solid fa-users"></i> 소속 반을 선택해주세요
+            </label>
+            <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4">
+              ${buttonsHtml}
+            </div>
+            <p class="text-sm text-slate-400">이미 투표를 완료한 반은 다시 선택할 수 없습니다.</p>
+          </div>
+        </section>
       `;
     }
 
     function renderVote() {
-      const currentTotal = Object.values(state.investments).reduce((a, b) => a + b, 0);
+      const currentTotal = Object.values(state.investments).reduce((a, b) => a + Number(b), 0);
       const remainingBudget = TOTAL_BUDGET - currentTotal;
-      const investedAmounts = Object.values(state.investments).filter(v => v > 0);
+      const investedAmounts = Object.values(state.investments).filter((value) => value > 0);
       const investedTeamsCount = investedAmounts.length;
       const hasUniqueAmounts = new Set(investedAmounts).size === investedTeamsCount;
-      const canSubmit = investedTeamsCount === 3 && remainingBudget === 0 && hasUniqueAmounts;
+      const canSubmit = investedTeamsCount === 3 && remainingBudget === 0 && hasUniqueAmounts && !state.submitting;
       const isMaxTeamsReached = investedTeamsCount >= 3;
 
-      let teamsHtml = "";
-
-      TEAMS.forEach(team => {
+      const teamsHtml = TEAMS.map((team) => {
         const isMyClass = team.id === state.myClass;
-        const currentInv = state.investments[team.id] || 0;
-        const disablePlus = isMyClass || remainingBudget < UNIT || (currentInv === 0 && isMaxTeamsReached);
-        const disableMinus = isMyClass || currentInv === 0;
+        const currentInv = Number(state.investments[team.id] || 0);
+        const disablePlus = isMyClass || remainingBudget < UNIT || (currentInv === 0 && isMaxTeamsReached) || state.submitting;
+        const disableMinus = isMyClass || currentInv === 0 || state.submitting;
 
-        teamsHtml += `
-          <div class="bg-white rounded-3xl p-6 shadow-md border-2 transition-all flex flex-col justify-between
-            ${isMyClass ? "border-slate-200 opacity-60 bg-slate-50" : "border-transparent hover:shadow-lg hover:border-blue-200"} ${currentInv > 0 ? "border-blue-400 bg-blue-50" : ""}">
-
+        return `
+          <article class="bg-white rounded-lg p-5 shadow-md border-2 transition-all flex flex-col justify-between
+            ${isMyClass ? "border-slate-200 opacity-60 bg-slate-50" : "border-transparent hover:shadow-lg hover:border-blue-200"}
+            ${currentInv > 0 ? "border-blue-400 bg-blue-50" : ""}">
             <div class="flex justify-between items-start mb-6">
-              <div class="bg-blue-100 text-blue-700 px-4 py-2 rounded-full text-xl font-bold">${team.id}반</div>
-              ${isMyClass ? `<span class="text-red-400 text-sm font-bold flex items-center gap-1"><i class="fa-solid fa-circle-exclamation"></i> 투표불가</span>` : ""}
+              <div class="bg-blue-100 text-blue-700 px-4 py-2 rounded-lg text-xl font-bold">${team.name}</div>
+              ${isMyClass ? `<span class="text-red-400 text-sm font-bold flex items-center gap-1"><i class="fa-solid fa-ban"></i> 본인 반</span>` : ""}
             </div>
-
-            <div class="bg-slate-100 rounded-2xl p-4 flex items-center justify-between mt-auto">
-              <button onclick="handleInvest(${team.id}, ${-UNIT})" ${disableMinus ? "disabled" : ""} class="w-12 h-12 rounded-full bg-white shadow flex items-center justify-center text-3xl font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-30 transition-transform active:scale-95">
-                -
-              </button>
-
+            <div class="bg-slate-100 rounded-lg p-4 flex items-center justify-between mt-auto">
+              <button onclick="handleInvest(${team.id}, ${-UNIT})" ${disableMinus ? "disabled" : ""} class="w-12 h-12 rounded-full bg-white shadow flex items-center justify-center text-3xl font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-30 transition-transform active:scale-95" aria-label="${team.name} 투자금 줄이기">-</button>
               <div class="text-center flex-1">
                 <span class="text-xs text-slate-400 block mb-1">나의 투자금</span>
                 <span class="text-2xl font-bold ${currentInv > 0 ? "text-blue-600" : "text-slate-600"}">${window.formatMoney(currentInv)}</span>
               </div>
-
-              <button onclick="handleInvest(${team.id}, ${UNIT})" ${disablePlus ? "disabled" : ""} class="w-12 h-12 rounded-full bg-blue-500 shadow flex items-center justify-center text-3xl font-bold text-white hover:bg-blue-600 disabled:opacity-30 transition-transform active:scale-95">
-                +
-              </button>
+              <button onclick="handleInvest(${team.id}, ${UNIT})" ${disablePlus ? "disabled" : ""} class="w-12 h-12 rounded-full bg-blue-500 shadow flex items-center justify-center text-3xl font-bold text-white hover:bg-blue-600 disabled:opacity-30 transition-transform active:scale-95" aria-label="${team.name} 투자금 늘리기">+</button>
             </div>
-          </div>
+          </article>
         `;
-      });
+      }).join("");
 
       const warningHtml = (remainingBudget === 0 && investedTeamsCount === 3 && !hasUniqueAmounts) ? `
-        <div class="animate-bounce bg-red-100 border border-red-300 text-red-600 p-3 rounded-xl mt-4 text-center font-bold text-sm md:text-base">
-          ⚠️ 투자 금액이 동일한 팀이 있습니다! 순위를 가릴 수 있도록 금액을 다르게 분배해주세요. (예: 500, 300, 200)
+        <div class="bg-red-100 border border-red-300 text-red-600 p-3 rounded-lg mt-4 text-center font-bold text-sm md:text-base">
+          투자 금액이 같은 반이 있습니다. 1위, 2위, 3위가 나뉘도록 금액을 다르게 배분해주세요. 예: 500만원, 300만원, 200만원
         </div>
       ` : "";
 
-      const errorHtml = state.errorMsg ? `
-        <div class="bg-red-100 text-red-600 p-3 rounded-xl mt-4 text-center font-bold">
-          ${state.errorMsg}
-        </div>
-      ` : "";
+      const errorHtml = state.errorMsg ? `<div class="bg-red-100 text-red-600 p-3 rounded-lg mt-4 text-center font-bold">${state.errorMsg}</div>` : "";
 
       return `
-        <div class="animate-fade-in">
+        <section class="animate-fade-in">
           <button onclick="goBackToIntro()" class="text-slate-500 hover:text-blue-600 flex items-center gap-2 mb-6 font-bold text-lg transition-colors">
-            <i class="fa-solid fa-arrow-left"></i> 반 다시 선택하기
+            <i class="fa-solid fa-arrow-left"></i> 다시 반 선택하기
           </button>
 
           <div class="sticky top-4 z-40 mb-8">
-            <div class="glass-panel rounded-3xl shadow-lg border-2 border-blue-200 p-4 px-6 flex flex-col md:flex-row items-center justify-between gap-4">
-
+            <div class="glass-panel rounded-lg shadow-lg border-2 border-blue-200 p-4 px-6 flex flex-col md:flex-row items-center justify-between gap-4">
               <div class="flex items-center gap-3 shrink-0">
-                <div class="bg-yellow-100 p-2.5 rounded-full w-12 h-12 flex items-center justify-center">
-                  <i class="fa-solid fa-wallet text-xl text-yellow-600"></i>
-                </div>
-
+                <div class="bg-yellow-100 p-2.5 rounded-full w-12 h-12 flex items-center justify-center"><i class="fa-solid fa-wallet text-xl text-yellow-600"></i></div>
                 <div class="text-left">
                   <p class="text-xs text-slate-500 whitespace-nowrap">남은 투자금</p>
-                  <p class="text-xl md:text-2xl font-bold whitespace-nowrap ${remainingBudget === 0 ? "text-green-500" : "text-blue-600"}">
-                    ${window.formatMoney(remainingBudget)}
-                  </p>
+                  <p class="text-xl md:text-2xl font-bold whitespace-nowrap ${remainingBudget === 0 ? "text-green-500" : "text-blue-600"}">${window.formatMoney(remainingBudget)}</p>
                 </div>
               </div>
-
               <div class="flex flex-col sm:flex-row gap-2 sm:gap-4 text-sm md:text-base text-slate-500 justify-center">
-                <div class="flex items-center gap-1.5 whitespace-nowrap ${investedTeamsCount === 3 ? "text-green-600" : ""}">
-                  <i class="fa-solid fa-circle-check"></i> 3팀 선택 (${investedTeamsCount}/3)
-                </div>
-
-                <div class="flex items-center gap-1.5 whitespace-nowrap ${remainingBudget === 0 ? "text-green-600" : ""}">
-                  <i class="fa-solid fa-circle-check"></i> 1000만원 모두 사용
-                </div>
-
-                <div class="flex items-center gap-1.5 whitespace-nowrap ${(investedTeamsCount > 1 && hasUniqueAmounts) ? "text-green-600" : ""}">
-                  <i class="fa-solid fa-circle-check"></i> 금액 차등 분배
-                </div>
+                <div class="flex items-center gap-1.5 whitespace-nowrap ${investedTeamsCount === 3 ? "text-green-600" : ""}"><i class="fa-solid fa-circle-check"></i> 3개 선택 (${investedTeamsCount}/3)</div>
+                <div class="flex items-center gap-1.5 whitespace-nowrap ${remainingBudget === 0 ? "text-green-600" : ""}"><i class="fa-solid fa-circle-check"></i> 1,000만원 사용</div>
+                <div class="flex items-center gap-1.5 whitespace-nowrap ${(investedTeamsCount > 1 && hasUniqueAmounts) ? "text-green-600" : ""}"><i class="fa-solid fa-circle-check"></i> 금액 차등 분배</div>
               </div>
-
-              <button onclick="handleSubmitVote()" ${!canSubmit || state.submitting ? "disabled" : ""} class="w-full md:w-auto px-6 py-2.5 rounded-full text-lg font-bold transition-all shadow-md flex items-center justify-center gap-2 whitespace-nowrap ${canSubmit && !state.submitting ? "bg-gradient-to-r from-blue-500 to-indigo-500 text-white hover:scale-105 active:scale-95 animate-bounce" : "bg-slate-200 text-slate-400 cursor-not-allowed"}">
+              <button onclick="handleSubmitVote()" ${!canSubmit ? "disabled" : ""} class="w-full md:w-auto px-6 py-2.5 rounded-full text-lg font-bold transition-all shadow-md flex items-center justify-center gap-2 whitespace-nowrap ${canSubmit ? "bg-gradient-to-r from-blue-500 to-emerald-500 text-white hover:scale-105 active:scale-95" : "bg-slate-200 text-slate-400 cursor-not-allowed"}">
                 ${state.submitting ? "제출 중..." : "투자 확정하기"} <i class="fa-solid fa-arrow-right"></i>
               </button>
             </div>
-
             ${warningHtml}
             ${errorHtml}
           </div>
 
-          <div class="bg-yellow-50 border border-yellow-200 text-yellow-700 p-4 rounded-2xl mb-8 flex items-start gap-3 shadow-sm">
+          <div class="bg-yellow-50 border border-yellow-200 text-yellow-700 p-4 rounded-lg mb-8 flex items-start gap-3 shadow-sm">
             <i class="fa-solid fa-circle-exclamation text-xl mt-1 shrink-0"></i>
-
             <p class="text-base md:text-lg">
-              <strong>${state.myClass}반</strong> 소속이시군요! 본인 반에는 투자할 수 없습니다.<br>
-              100만원 단위로 분배하여 <strong>정확히 3팀</strong>에게 1,000만원을 투자하되, 1/2/3등을 가릴 수 있도록 <strong>세 팀의 투자 금액은 모두 다르게</strong> 설정해주세요.<br>
-              <span class="text-red-500 font-bold">※ 한 번 제출하면 수정할 수 없고, 한 반은 한 번만 투표할 수 있습니다.</span>
+              <strong>${state.myClass}반</strong> 소속입니다. 본인 반에는 투자할 수 없습니다.<br>
+              100만원 단위로 <strong>정확히 3개 반</strong>에 1,000만원을 모두 투자하고, 각 반의 금액은 서로 다르게 정해주세요.
             </p>
           </div>
 
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            ${teamsHtml}
-          </div>
-        </div>
-      `;
-    }
-
-    function renderComplete() {
-      return `
-        <div class="bg-white rounded-3xl shadow-xl p-8 md:p-12 text-center animate-fade-in">
-          <div class="inline-flex items-center justify-center w-24 h-24 bg-green-100 text-green-600 rounded-full mb-6 shadow-md">
-            <i class="fa-solid fa-circle-check text-6xl"></i>
-          </div>
-
-          <h2 class="text-4xl font-bold text-slate-800 mb-4">투표 완료</h2>
-
-          <p class="text-xl text-slate-500 leading-relaxed mb-8">
-            소중한 투표가 정상적으로 제출되었습니다.<br>
-            한 번 제출한 투표는 수정할 수 없습니다.<br>
-            최종 결과는 선생님이 투표를 마감한 후 공개됩니다.
-          </p>
-
-          <div class="bg-blue-50 border border-blue-200 text-blue-700 p-5 rounded-2xl max-w-md mx-auto">
-            <i class="fa-solid fa-lock text-2xl mb-2 block"></i>
-            <p class="font-bold">
-              ${state.myClass ? `${state.myClass}반 투표가 완료되었습니다.` : "투표가 완료되었습니다."}
-            </p>
-            <p class="text-sm mt-1 text-blue-500">
-              결과 화면은 아직 공개되지 않습니다.
-            </p>
-          </div>
-        </div>
-      `;
-    }
-
-    function renderCountdown() {
-      return `
-        <div class="min-h-[60vh] flex items-center justify-center">
-          <div class="bg-gradient-to-br from-indigo-600 to-blue-500 text-white rounded-[2rem] shadow-2xl p-10 md:p-16 text-center w-full max-w-2xl">
-            <p class="text-xl md:text-2xl text-blue-100 mb-4">최종 결과 공개까지</p>
-
-            <div class="countdown-pop text-[9rem] md:text-[12rem] leading-none font-black drop-shadow-lg" key="${state.countdown}">
-              ${state.countdown}
-            </div>
-
-            <p class="text-2xl md:text-4xl font-bold mt-6 animate-pulse">
-              두근두근... 결과를 공개합니다!
-            </p>
-
-            <div class="mt-8 flex justify-center gap-3 text-yellow-300 text-3xl">
-              <i class="fa-solid fa-star"></i>
-              <i class="fa-solid fa-trophy"></i>
-              <i class="fa-solid fa-star"></i>
-            </div>
-          </div>
-        </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">${teamsHtml}</div>
+        </section>
       `;
     }
 
     function renderResult() {
-      const isClosed = state.status === "CLOSED";
-
-      const sortedTeams = TEAMS.map(team => ({
+      const sortedTeams = TEAMS.map((team) => ({
         ...team,
-        total: Number(state.globalTotals[String(team.id)] || state.globalTotals[team.id] || 0)
+        total: Number(state.globalTotals[team.id] || 0)
       })).sort((a, b) => b.total - a.total);
 
-      const maxTotal = Math.max(
-        ...Object.values(state.globalTotals).map(v => Number(v || 0)),
-        TOTAL_BUDGET
-      );
+      const maxTotal = Math.max(...Object.values(state.globalTotals).map(Number), TOTAL_BUDGET);
 
-      let ranksHtml = "";
-
-      sortedTeams.forEach((team, index) => {
+      const ranksHtml = sortedTeams.map((team, index) => {
         const percentage = (team.total / (maxTotal || 1)) * 100;
-
         let rankIcon = `<span class="w-8 h-8 flex items-center justify-center bg-slate-200 rounded-full text-slate-600 font-bold">${index + 1}</span>`;
-        let cardStyle = "bg-white border border-slate-100 p-4 rounded-2xl shadow-sm mb-4 transition-all";
+        let cardStyle = "bg-white border border-slate-100 p-4 rounded-lg shadow-sm mb-4 transition-all";
         let barColor = "bg-gradient-to-r from-blue-400 to-cyan-300";
         let titleColor = "text-lg";
         let amtColor = "text-xl text-blue-600";
 
         if (index === 0) {
           rankIcon = `<i class="fa-solid fa-trophy text-4xl text-yellow-500 drop-shadow-lg"></i>`;
-          cardStyle = "bg-gradient-to-br from-yellow-50 to-white border-2 border-yellow-300 p-6 rounded-2xl shadow-lg scale-[1.02] mb-6 z-10 relative";
+          cardStyle = "bg-gradient-to-br from-yellow-50 to-white border-2 border-yellow-300 p-6 rounded-lg shadow-lg scale-[1.02] mb-6 z-10 relative";
           barColor = "bg-gradient-to-r from-yellow-400 to-yellow-200";
           titleColor = "text-2xl text-yellow-800 font-black";
           amtColor = "text-3xl text-yellow-600";
         } else if (index === 1) {
           rankIcon = `<i class="fa-solid fa-trophy text-3xl text-slate-400 drop-shadow"></i>`;
-          cardStyle = "bg-gradient-to-br from-slate-50 to-white border-2 border-slate-300 p-5 rounded-2xl mb-4 shadow-md";
+          cardStyle = "bg-gradient-to-br from-slate-50 to-white border-2 border-slate-300 p-5 rounded-lg mb-4 shadow-md";
           barColor = "bg-gradient-to-r from-slate-400 to-slate-200";
         } else if (index === 2) {
           rankIcon = `<i class="fa-solid fa-trophy text-3xl text-amber-600 drop-shadow"></i>`;
-          cardStyle = "bg-gradient-to-br from-amber-50 to-white border-2 border-amber-200 p-5 rounded-2xl mb-4 shadow-md";
+          cardStyle = "bg-gradient-to-br from-amber-50 to-white border-2 border-amber-200 p-5 rounded-lg mb-4 shadow-md";
           barColor = "bg-gradient-to-r from-amber-500 to-amber-300";
         }
 
-        ranksHtml += `
-          <div class="${cardStyle}" style="transition-duration: 800ms">
+        return `
+          <article class="${cardStyle}" style="transition-duration: 800ms">
             <div class="flex items-center gap-4 mb-3">
               <div class="w-10 text-center shrink-0">${rankIcon}</div>
-
-              <div class="flex-1 font-bold text-slate-700 flex justify-between items-center">
-                <span class="${titleColor} whitespace-nowrap">${team.id}반</span>
+              <div class="flex-1 font-bold text-slate-700 flex justify-between items-center gap-3">
+                <span class="${titleColor} whitespace-nowrap">${team.name}</span>
                 <span class="font-black ${amtColor} whitespace-nowrap">${window.formatMoney(team.total)}</span>
               </div>
             </div>
-
             <div class="ml-14 h-4 md:h-6 bg-slate-100 rounded-full overflow-hidden shadow-inner">
               <div class="h-full rounded-full transition-all duration-1000 relative overflow-hidden ${barColor}" style="width: ${Math.max(percentage, 1)}%">
                 <div class="absolute top-0 left-0 right-0 bottom-0 bg-white/30 -skew-x-12 translate-x-[-100%] animate-shimmer"></div>
               </div>
             </div>
-          </div>
+          </article>
         `;
-      });
+      }).join("");
+
+      const myInvestments = Object.entries(state.investments).filter(([, amount]) => Number(amount) > 0);
+      const myInvestmentsHtml = myInvestments.length > 0
+        ? myInvestments.map(([classId, amount]) => `<span class="bg-white px-4 py-2 rounded-full shadow-sm text-slate-700 font-bold border border-blue-100 whitespace-nowrap">${classId}반: <span class="text-blue-600">${window.formatMoney(amount)}</span></span>`).join("")
+        : `<span class="text-slate-400">이 기기의 투표 내역이 없습니다.</span>`;
+
+      const isClosed = state.status === "CLOSED";
 
       return `
-        <div class="bg-white rounded-3xl shadow-xl p-6 md:p-10 animate-fade-in">
+        <section class="bg-white rounded-lg shadow-xl p-6 md:p-10 animate-fade-in">
           <div class="text-center mb-10">
             <div class="relative inline-block">
               <i class="fa-solid fa-arrow-trend-up text-6xl text-blue-500 mb-4 animate-pulse drop-shadow-md"></i>
-              <i class="fa-solid fa-wand-magic-sparkles text-2xl text-yellow-400 absolute top-0 right-[-10px] animate-ping"></i>
+            </div>
+            <h2 class="text-3xl font-bold text-slate-800 mb-2">실시간 투자 현황</h2>
+            <p class="text-slate-500">같은 반의 중복 기록은 최신 1건만 집계됩니다.</p>
+          </div>
+
+          <div class="space-y-4 relative">${ranksHtml}</div>
+
+          <div class="mt-12 bg-blue-50 text-blue-700 p-6 rounded-lg text-center shadow-inner">
+            <i class="fa-solid fa-coins text-4xl mb-2 text-yellow-500 block"></i>
+            <p class="text-xl font-bold mb-4">나의 투자 내역</p>
+            <div class="flex flex-wrap justify-center gap-3">${myInvestmentsHtml}</div>
+          </div>
+
+          ${!isClosed && state.myClass ? `
+            <div class="mt-8 text-center">
+              <button onclick="goToEdit()" class="inline-flex items-center gap-2 px-6 py-3 bg-white border-2 border-slate-200 rounded-full text-slate-600 font-bold hover:bg-slate-50 hover:text-blue-600 shadow-sm transition-colors">
+                <i class="fa-solid fa-pen-to-square"></i> 내 투표 수정하기
+              </button>
+            </div>
+          ` : `
+            <div class="mt-8 text-center">
+              <p class="${isClosed ? "text-red-500 bg-red-50 border-red-200" : "text-slate-500 bg-slate-50 border-slate-200"} font-bold p-3 rounded-lg border">
+                ${isClosed ? "투표가 마감되어 결과가 확정되었습니다." : "반을 선택하면 투표할 수 있습니다."}
+              </p>
+            </div>
+          `}
+        </section>
+      `;
+    }
+
+    function renderAdminPanel() {
+      const visibleClass = state.admin.visible ? "" : "hidden";
+      const statusText = state.status === "CLOSED" ? "마감" : "진행 중";
+      const statusClass = state.status === "CLOSED" ? "bg-red-100 text-red-600" : "bg-emerald-100 text-emerald-700";
+      const votedText = state.votedClassList.length
+        ? state.votedClassList.map((num) => `${num}반`).join(", ")
+        : "아직 없음";
+
+      return `
+        <div class="fixed bottom-4 right-4 z-50">
+          <button onclick="toggleAdmin()" class="w-12 h-12 bg-slate-800 text-white rounded-full opacity-40 hover:opacity-100 flex items-center justify-center transition-opacity shadow-lg" aria-label="관리자 메뉴">
+            <i class="fa-solid fa-gear text-xl"></i>
+          </button>
+        </div>
+
+        <aside id="admin-panel" class="${visibleClass} fixed bottom-20 right-4 bg-white border border-slate-200 p-5 rounded-lg shadow-2xl z-50 w-[min(22rem,calc(100vw-2rem))] text-left">
+          <div class="flex items-center justify-between gap-3 mb-4">
+            <h3 class="font-bold text-lg text-slate-800 flex items-center gap-2"><i class="fa-solid fa-user-tie"></i> 관리자 메뉴</h3>
+            <span class="px-2.5 py-1 rounded-full text-xs font-bold ${statusClass}">${statusText}</span>
+          </div>
+
+          ${state.admin.unlocked ? `
+            <div class="grid grid-cols-2 gap-2 mb-4 text-sm">
+              <div class="bg-slate-50 border border-slate-100 rounded-lg p-3">
+                <div class="text-slate-400">투표 완료</div>
+                <div class="text-xl font-bold text-slate-800">${state.voteCount}/10</div>
+              </div>
+              <div class="bg-slate-50 border border-slate-100 rounded-lg p-3">
+                <div class="text-slate-400">완료 반</div>
+                <div class="font-bold text-slate-700 truncate" title="${votedText}">${votedText}</div>
+              </div>
             </div>
 
-            <h2 class="text-3xl font-bold text-slate-800 mb-2">
-              🏆 최종 투자 결과 🏆
-            </h2>
+            <div class="grid grid-cols-2 gap-2">
+              ${state.status === "CLOSED" ? `
+                <button onclick="adminCommand('open')" ${state.admin.busy ? "disabled" : ""} class="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white py-3 rounded-lg font-bold transition-colors">
+                  <i class="fa-solid fa-lock-open"></i> 다시 열기
+                </button>
+              ` : `
+                <button onclick="adminCommand('close')" ${state.admin.busy ? "disabled" : ""} class="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-3 rounded-lg font-bold transition-colors">
+                  <i class="fa-solid fa-lock"></i> 마감
+                </button>
+              `}
+              <button onclick="adminCommand('dedupe')" ${state.admin.busy ? "disabled" : ""} class="bg-slate-700 hover:bg-slate-800 disabled:opacity-50 text-white py-3 rounded-lg font-bold transition-colors">
+                <i class="fa-solid fa-filter-circle-xmark"></i> 중복 정리
+              </button>
+            </div>
 
-            <p class="text-slate-500">
-              투표가 마감되었습니다. 구글 시트 기준 최종 집계 결과입니다!
-            </p>
-          </div>
+            <button onclick="adminCommand('reset')" ${state.admin.busy ? "disabled" : ""} class="w-full mt-3 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 py-3 rounded-lg font-bold transition-colors disabled:opacity-50">
+              <i class="fa-solid fa-trash-can"></i> 전체 초기화
+            </button>
+          ` : `
+            <label class="block text-sm text-slate-500 mb-2" for="admin-pin">관리자 비밀번호</label>
+            <div class="flex gap-2">
+              <input id="admin-pin" type="password" inputmode="numeric" autocomplete="off" oninput="updateAdminPin(this.value)" onkeydown="if(event.key === 'Enter') adminUnlock()" class="min-w-0 flex-1 border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300" placeholder="비밀번호">
+              <button onclick="adminUnlock()" ${state.admin.busy ? "disabled" : ""} class="px-4 py-2 bg-slate-800 text-white rounded-lg font-bold disabled:opacity-50">확인</button>
+            </div>
+          `}
 
-          <div class="space-y-4 relative">
-            ${ranksHtml}
-          </div>
-
-          <div class="mt-8 text-center">
-            <p class="text-red-500 font-bold bg-red-50 p-3 rounded-xl border border-red-200">
-              투표가 마감되었습니다. 위 화면은 최종 집계 결과입니다.
-            </p>
-          </div>
-        </div>
+          ${state.admin.message ? `<div class="mt-3 text-sm font-bold ${state.admin.message.includes("올바르지") || state.admin.message.includes("오류") || state.admin.message.includes("실패") ? "text-red-600" : "text-emerald-700"}">${state.admin.message}</div>` : ""}
+        </aside>
       `;
     }
 
