@@ -4,14 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>명지동 창업 아이템 모의 투자 대회</title>
-  
-  <!-- Tailwind CSS -->
+
   <script src="https://cdn.tailwindcss.com"></script>
-  
-  <!-- Google Fonts: Jua -->
+
   <link href="https://fonts.googleapis.com/css2?family=Jua&display=swap" rel="stylesheet">
-  
-  <!-- FontAwesome Icons -->
+
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
   <style>
@@ -21,70 +18,92 @@
     .animate-shimmer { animation: shimmer 2s infinite; }
   </style>
 </head>
+
 <body class="bg-slate-50 text-slate-800 pb-20 min-h-screen">
-  
+
   <div id="app"></div>
 
   <script>
-    // 🔗 구글 앱스 스크립트 웹 앱 URL (선생님 링크)
     const GAS_URL = "https://script.google.com/macros/s/AKfycbxduMg1yfs-m06WAOqbI7mTamKN876bNnY3H_mTl9ZTXtYS1iq6YdvDuhH2vE9k0QDJrw/exec";
 
-    // --- 상태 관리 (State Management) ---
     const state = {
-      // 내 스마트폰/브라우저 고유 ID (투표 수정 시 덮어쓰기에 필요)
       userId: localStorage.getItem('myeongji_uid') || 'user_' + Math.random().toString(36).substr(2, 9),
-      step: 'intro', // 'intro', 'vote', 'result'
+      step: 'intro',
       myClass: null,
       investments: {},
       globalTotals: {},
       loading: true,
       errorMsg: null,
       pollingInterval: null,
-      status: 'OPEN' // OPEN or CLOSED
+      status: 'OPEN'
     };
 
-    // 고유 ID 저장
     localStorage.setItem('myeongji_uid', state.userId);
 
-    const TEAMS = Array.from({length: 10}, (_, i) => ({ id: i + 1, name: `${i + 1}반` }));
+    const TEAMS = Array.from({ length: 10 }, (_, i) => ({ id: i + 1, name: `${i + 1}반` }));
     const TOTAL_BUDGET = 10000000;
     const UNIT = 1000000;
 
-    // --- API 통신 함수 (구글 시트 연동) ---
     async function loadGlobalTotals() {
       try {
-        // ?t= 뒤에 현재 시간을 붙여 브라우저가 과거 데이터를 기억(캐시)하지 못하도록 강제 최신화
         const urlWithCacheBuster = GAS_URL + "?t=" + new Date().getTime();
-        const res = await fetch(urlWithCacheBuster);
-        if (res.ok) {
-          const data = await res.json();
-          state.globalTotals = data.totals || {};
-          state.status = data.status || 'OPEN';
+
+        const res = await fetch(urlWithCacheBuster, {
+          method: "GET",
+          cache: "no-store"
+        });
+
+        if (!res.ok) {
+          throw new Error("서버 응답 오류");
         }
+
+        const data = await res.json();
+
+        state.globalTotals = data.totals || {};
+        state.status = data.status || "OPEN";
+
+        if (data.resetAt) {
+          const localResetAt = localStorage.getItem("myeongji_reset_at");
+
+          if (localResetAt !== data.resetAt) {
+            localStorage.setItem("myeongji_reset_at", data.resetAt);
+            localStorage.removeItem("myeongji_my_vote");
+            state.investments = {};
+            state.myClass = null;
+            state.step = "intro";
+          }
+        }
+
       } catch (e) {
         console.error("데이터 로드 실패:", e);
+        state.errorMsg = "결과 데이터를 불러오지 못했습니다.";
       }
     }
 
-    // 초기 실행
     async function init() {
       await loadGlobalTotals();
-      
-      // 내 로컬에 저장된 이전 투표 기록이 있으면 결과창으로 바로 이동 (새로고침 시 유지)
+
       const savedVote = localStorage.getItem('myeongji_my_vote');
-      if (savedVote) {
+
+      if (savedVote && state.status !== "OPEN") {
         try {
           const parsed = JSON.parse(savedVote);
           state.myClass = parsed.myClass;
-          state.investments = parsed.investments;
+          state.investments = parsed.investments || {};
           state.step = 'result';
-        } catch(e) {}
+        } catch (e) {}
+      } else if (savedVote && state.status === "OPEN") {
+        try {
+          const parsed = JSON.parse(savedVote);
+          state.myClass = parsed.myClass;
+          state.investments = parsed.investments || {};
+          state.step = 'result';
+        } catch (e) {}
       }
-      
+
       state.loading = false;
       render();
 
-      // 실시간 데이터 갱신 (5초마다)
       state.pollingInterval = setInterval(async () => {
         if (state.step === 'result' || state.status === 'CLOSED') {
           await loadGlobalTotals();
@@ -93,7 +112,6 @@
       }, 5000);
     }
 
-    // --- 핸들러 함수 (Handlers) ---
     window.formatMoney = (num) => {
       if (!num) return "0원";
       return `${(num / 10000).toLocaleString()}만원`;
@@ -104,6 +122,7 @@
         alert("투표가 이미 마감되었습니다!");
         return;
       }
+
       state.myClass = classNum;
       state.step = 'vote';
       render();
@@ -120,6 +139,7 @@
         alert("투표가 마감되어 수정할 수 없습니다.");
         return;
       }
+
       state.step = 'vote';
       render();
     };
@@ -127,14 +147,17 @@
     window.handleInvest = (teamId, amount) => {
       const current = state.investments[teamId] || 0;
       const newValue = current + amount;
+
       if (newValue < 0) return;
 
       const isNewInvestment = current === 0 && amount > 0;
       const investedTeamsCount = Object.values(state.investments).filter(v => v > 0).length;
+
       if (isNewInvestment && investedTeamsCount >= 3) return;
 
       const tempInvestments = { ...state.investments, [teamId]: newValue };
       const totalInvested = Object.values(tempInvestments).reduce((a, b) => a + b, 0);
+
       if (totalInvested > TOTAL_BUDGET) return;
 
       state.investments = tempInvestments;
@@ -149,7 +172,7 @@
       try {
         const payload = {
           action: 'vote',
-          userId: state.userId, // 누구인지 서버에 알려서 덮어쓰기(수정) 처리
+          userId: state.userId,
           myClass: state.myClass,
           investments: state.investments
         };
@@ -157,7 +180,8 @@
         const res = await fetch(GAS_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify(payload)
+          body: JSON.stringify(payload),
+          cache: "no-store"
         });
 
         const result = await res.json();
@@ -165,9 +189,22 @@
         if (result.error) {
           state.errorMsg = result.error;
         } else if (result.result === "success") {
-          localStorage.setItem('myeongji_my_vote', JSON.stringify({myClass: state.myClass, investments: state.investments}));
-          await loadGlobalTotals(); // 최신 합계 갱신
-          state.step = 'result';
+          localStorage.setItem(
+            "myeongji_my_vote",
+            JSON.stringify({
+              myClass: state.myClass,
+              investments: state.investments
+            })
+          );
+
+          if (result.totals) {
+            state.globalTotals = result.totals;
+          } else {
+            await loadGlobalTotals();
+          }
+
+          state.status = result.status || state.status || "OPEN";
+          state.step = "result";
         }
       } catch (err) {
         state.errorMsg = "네트워크 오류가 발생했습니다. 다시 시도해주세요.";
@@ -177,59 +214,89 @@
       }
     };
 
-    // --- 선생님 (관리자) 기능 ---
     window.toggleAdmin = () => {
       const p = prompt("관리자 비밀번호를 입력하세요");
+
       if (p === "1700") {
         const panel = document.getElementById('admin-panel');
-        if(panel) panel.classList.toggle('hidden');
+        if (panel) panel.classList.toggle('hidden');
       } else if (p) {
         alert("비밀번호가 틀렸습니다.");
       }
     };
 
     window.adminCommand = async (cmd) => {
-      const confirmMsg = cmd === 'close' ? "투표를 마감하고 결과를 확인하시겠습니까?" : 
-                         cmd === 'reset' ? "구글 시트의 모든 투표 데이터를 삭제하고 초기화하시겠습니까? (복구 불가)" : "";
-      if(!confirm(confirmMsg)) return;
+      const confirmMsg = cmd === 'close'
+        ? "투표를 마감하고 결과를 확인하시겠습니까?"
+        : cmd === 'reset'
+          ? "구글 시트의 모든 투표 데이터를 삭제하고 초기화하시겠습니까? (복구 불가)"
+          : "";
 
-      state.loading = true; 
+      if (!confirm(confirmMsg)) return;
+
+      state.loading = true;
       render();
-      
+
       try {
         const response = await fetch(GAS_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'admin', cmd: cmd })
+          body: JSON.stringify({ action: 'admin', cmd: cmd }),
+          cache: "no-store"
         });
-        
+
         const result = await response.json();
-        
+
         if (result.error) throw new Error(result.error);
-        
-        alert("처리되었습니다.");
-        
+
         if (cmd === 'close') {
-          await loadGlobalTotals();
-          state.step = 'result';
+          state.status = result.status || "CLOSED";
+
+          if (result.totals) {
+            state.globalTotals = result.totals;
+          } else {
+            await loadGlobalTotals();
+          }
+
+          state.step = "result";
+          alert("투표가 마감되었습니다. 결과를 확인합니다.");
+
         } else if (cmd === 'reset') {
-          state.step = 'intro';
+          state.step = "intro";
           state.investments = {};
-          state.status = 'OPEN';
-          localStorage.removeItem('myeongji_my_vote'); // 로컬 기록도 리셋
+          state.globalTotals = {};
+          state.status = "OPEN";
+          state.myClass = null;
+          state.errorMsg = null;
+
+          localStorage.removeItem("myeongji_my_vote");
+
+          if (result.resetAt) {
+            localStorage.setItem("myeongji_reset_at", result.resetAt);
+          }
+
+          await loadGlobalTotals();
+
+          state.step = "intro";
+          state.investments = {};
+          state.globalTotals = {};
+          state.status = "OPEN";
+          state.myClass = null;
+
+          alert("투표 결과가 리셋되었습니다.");
         }
-      } catch (e) { 
-        alert("오류 발생: " + e.message); 
+
+      } catch (e) {
+        alert("오류 발생: " + e.message);
       }
-      
-      state.loading = false; 
+
+      state.loading = false;
       render();
     };
 
-    // --- 렌더링 로직 (HTML UI) ---
     function render() {
       const appDiv = document.getElementById('app');
-      
+
       if (state.loading) {
         appDiv.innerHTML = `
           <div class="min-h-screen flex flex-col items-center justify-center bg-slate-50">
@@ -251,28 +318,38 @@
             <i class="fa-solid fa-wand-magic-sparkles text-yellow-300"></i>
           </h1>
         </header>
+
         <main class="max-w-4xl mx-auto mt-8 px-4 relative">
       `;
 
-      if (state.step === 'intro') { html += renderIntro(); } 
-      else if (state.step === 'vote') { html += renderVote(); } 
-      else if (state.step === 'result') { html += renderResult(); }
+      if (state.step === 'intro') {
+        html += renderIntro();
+      } else if (state.step === 'vote') {
+        html += renderVote();
+      } else if (state.step === 'result') {
+        html += renderResult();
+      }
 
       html += `</main>`;
 
-      // 관리자 플로팅 버튼 및 패널
       html += `
         <div class="fixed bottom-4 right-4 z-50">
           <button onclick="toggleAdmin()" class="w-12 h-12 bg-slate-800 text-white rounded-full opacity-20 hover:opacity-100 flex items-center justify-center transition-opacity shadow-lg">
             <i class="fa-solid fa-gear text-xl"></i>
           </button>
         </div>
+
         <div id="admin-panel" class="hidden fixed bottom-20 right-4 bg-white border-2 border-slate-800 p-5 rounded-2xl shadow-2xl z-50 w-72 text-left">
-          <h3 class="font-bold text-lg mb-4 text-slate-800"><i class="fa-solid fa-user-tie"></i> 선생님 관리자 메뉴</h3>
+          <h3 class="font-bold text-lg mb-4 text-slate-800">
+            <i class="fa-solid fa-user-tie"></i> 선생님 관리자 메뉴
+          </h3>
+
           <button onclick="adminCommand('close')" class="w-full mb-3 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold animate-pulse shadow-md transition-colors">
             <i class="fa-solid fa-stopwatch"></i> 투표 마감 및 결과 확인
           </button>
+
           <hr class="my-3 border-slate-200">
+
           <button onclick="adminCommand('reset')" class="w-full bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 py-2.5 rounded-xl font-bold transition-colors">
             <i class="fa-solid fa-trash-can"></i> 투표 결과 리셋 (초기화)
           </button>
@@ -284,10 +361,15 @@
 
     function renderIntro() {
       let buttonsHtml = '';
+
       for (let num = 1; num <= 10; num++) {
-        buttonsHtml += `<button onclick="handleStart(${num})" class="py-3 bg-slate-100 hover:bg-blue-100 hover:text-blue-600 rounded-xl transition-colors font-bold text-lg shadow-sm border border-slate-200">${num}반</button>`;
+        buttonsHtml += `
+          <button onclick="handleStart(${num})" class="py-3 bg-slate-100 hover:bg-blue-100 hover:text-blue-600 rounded-xl transition-colors font-bold text-lg shadow-sm border border-slate-200">
+            ${num}반
+          </button>
+        `;
       }
-      
+
       const closedBanner = state.status === 'CLOSED' ? `
         <div class="bg-red-100 text-red-600 p-4 rounded-xl mb-6 font-bold text-lg border-2 border-red-200 animate-pulse">
           🚨 현재 투표가 마감되었습니다! 🚨
@@ -297,19 +379,22 @@
       return `
         <div class="bg-white rounded-3xl shadow-xl p-8 text-center animate-fade-in">
           <i class="fa-solid fa-trophy text-6xl text-yellow-400 mb-6 drop-shadow-md block"></i>
+
           <h2 class="text-3xl mb-4 text-slate-700">우리 동네에 꼭 필요한 사업은 무엇일까?</h2>
+
           <p class="text-lg text-slate-500 mb-8 leading-relaxed">
-            명지동을 더 살기 좋은 곳으로 만들 톡톡 튀는 창업 아이템들이 모였습니다.<br/>
-            여러분에게는 <strong>1,000만원</strong>의 투자금이 주어집니다.<br/>
+            명지동을 더 살기 좋은 곳으로 만들 톡톡 튀는 창업 아이템들이 모였습니다.<br>
+            여러분에게는 <strong>1,000만원</strong>의 투자금이 주어집니다.<br>
             우리 지역사회에 가장 큰 도움이 될 것 같은 <span class="text-blue-500">3개의 반</span>을 골라 자유롭게 투자해주세요!
           </p>
-          
+
           ${closedBanner}
 
           <div class="max-w-sm mx-auto">
             <label class="block text-left text-lg mb-2 text-slate-600 flex items-center gap-2">
               <i class="fa-solid fa-user"></i> 내 소속 반을 선택해주세요
             </label>
+
             <div class="grid grid-cols-5 gap-3 mb-6">
               ${buttonsHtml}
             </div>
@@ -328,6 +413,7 @@
       const isMaxTeamsReached = investedTeamsCount >= 3;
 
       let teamsHtml = '';
+
       TEAMS.forEach(team => {
         const isMyClass = team.id === state.myClass;
         const currentInv = state.investments[team.id] || 0;
@@ -337,17 +423,25 @@
         teamsHtml += `
           <div class="bg-white rounded-3xl p-6 shadow-md border-2 transition-all flex flex-col justify-between 
             ${isMyClass ? 'border-slate-200 opacity-60 bg-slate-50' : 'border-transparent hover:shadow-lg hover:border-blue-200'} ${currentInv > 0 ? 'border-blue-400 bg-blue-50' : ''}">
+
             <div class="flex justify-between items-start mb-6">
               <div class="bg-blue-100 text-blue-700 px-4 py-2 rounded-full text-xl font-bold">${team.id}반</div>
               ${isMyClass ? `<span class="text-red-400 text-sm font-bold flex items-center gap-1"><i class="fa-solid fa-circle-exclamation"></i> 투표불가</span>` : ''}
             </div>
+
             <div class="bg-slate-100 rounded-2xl p-4 flex items-center justify-between mt-auto">
-              <button onclick="handleInvest(${team.id}, ${-UNIT})" ${disableMinus ? 'disabled' : ''} class="w-12 h-12 rounded-full bg-white shadow flex items-center justify-center text-3xl font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-30 transition-transform active:scale-95">-</button>
+              <button onclick="handleInvest(${team.id}, ${-UNIT})" ${disableMinus ? 'disabled' : ''} class="w-12 h-12 rounded-full bg-white shadow flex items-center justify-center text-3xl font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-30 transition-transform active:scale-95">
+                -
+              </button>
+
               <div class="text-center flex-1">
                 <span class="text-xs text-slate-400 block mb-1">나의 투자금</span>
                 <span class="text-2xl font-bold ${currentInv > 0 ? 'text-blue-600' : 'text-slate-600'}">${window.formatMoney(currentInv)}</span>
               </div>
-              <button onclick="handleInvest(${team.id}, ${UNIT})" ${disablePlus ? 'disabled' : ''} class="w-12 h-12 rounded-full bg-blue-500 shadow flex items-center justify-center text-3xl font-bold text-white hover:bg-blue-600 disabled:opacity-30 transition-transform active:scale-95">+</button>
+
+              <button onclick="handleInvest(${team.id}, ${UNIT})" ${disablePlus ? 'disabled' : ''} class="w-12 h-12 rounded-full bg-blue-500 shadow flex items-center justify-center text-3xl font-bold text-white hover:bg-blue-600 disabled:opacity-30 transition-transform active:scale-95">
+                +
+              </button>
             </div>
           </div>
         `;
@@ -358,45 +452,70 @@
           ⚠️ 투자 금액이 동일한 팀이 있습니다! 순위를 가릴 수 있도록 금액을 다르게 분배해주세요. (예: 500, 300, 200)
         </div>
       ` : '';
-      
-      const errorHtml = state.errorMsg ? `<div class="bg-red-100 text-red-600 p-3 rounded-xl mt-4 text-center font-bold">${state.errorMsg}</div>` : '';
+
+      const errorHtml = state.errorMsg ? `
+        <div class="bg-red-100 text-red-600 p-3 rounded-xl mt-4 text-center font-bold">
+          ${state.errorMsg}
+        </div>
+      ` : '';
 
       return `
         <div class="animate-fade-in">
           <button onclick="goBackToIntro()" class="text-slate-500 hover:text-blue-600 flex items-center gap-2 mb-6 font-bold text-lg transition-colors">
             <i class="fa-solid fa-arrow-left"></i> 반 다시 선택하기
           </button>
-          
+
           <div class="sticky top-4 z-40 mb-8">
             <div class="glass-panel rounded-3xl shadow-lg border-2 border-blue-200 p-4 px-6 flex flex-col md:flex-row items-center justify-between gap-4">
+
               <div class="flex items-center gap-3 shrink-0">
-                <div class="bg-yellow-100 p-2.5 rounded-full w-12 h-12 flex items-center justify-center"><i class="fa-solid fa-wallet text-xl text-yellow-600"></i></div>
+                <div class="bg-yellow-100 p-2.5 rounded-full w-12 h-12 flex items-center justify-center">
+                  <i class="fa-solid fa-wallet text-xl text-yellow-600"></i>
+                </div>
+
                 <div class="text-left">
                   <p class="text-xs text-slate-500 whitespace-nowrap">남은 투자금</p>
-                  <p class="text-xl md:text-2xl font-bold whitespace-nowrap ${remainingBudget === 0 ? 'text-green-500' : 'text-blue-600'}">${window.formatMoney(remainingBudget)}</p>
+                  <p class="text-xl md:text-2xl font-bold whitespace-nowrap ${remainingBudget === 0 ? 'text-green-500' : 'text-blue-600'}">
+                    ${window.formatMoney(remainingBudget)}
+                  </p>
                 </div>
               </div>
+
               <div class="flex flex-col sm:flex-row gap-2 sm:gap-4 text-sm md:text-base text-slate-500 justify-center">
-                <div class="flex items-center gap-1.5 whitespace-nowrap ${investedTeamsCount === 3 ? 'text-green-600' : ''}"><i class="fa-solid fa-circle-check"></i> 3팀 선택 (${investedTeamsCount}/3)</div>
-                <div class="flex items-center gap-1.5 whitespace-nowrap ${remainingBudget === 0 ? 'text-green-600' : ''}"><i class="fa-solid fa-circle-check"></i> 1000만원 모두 사용</div>
-                <div class="flex items-center gap-1.5 whitespace-nowrap ${(investedTeamsCount > 1 && hasUniqueAmounts) ? 'text-green-600' : ''}"><i class="fa-solid fa-circle-check"></i> 금액 차등 분배</div>
+                <div class="flex items-center gap-1.5 whitespace-nowrap ${investedTeamsCount === 3 ? 'text-green-600' : ''}">
+                  <i class="fa-solid fa-circle-check"></i> 3팀 선택 (${investedTeamsCount}/3)
+                </div>
+
+                <div class="flex items-center gap-1.5 whitespace-nowrap ${remainingBudget === 0 ? 'text-green-600' : ''}">
+                  <i class="fa-solid fa-circle-check"></i> 1000만원 모두 사용
+                </div>
+
+                <div class="flex items-center gap-1.5 whitespace-nowrap ${(investedTeamsCount > 1 && hasUniqueAmounts) ? 'text-green-600' : ''}">
+                  <i class="fa-solid fa-circle-check"></i> 금액 차등 분배
+                </div>
               </div>
+
               <button onclick="handleSubmitVote()" ${!canSubmit ? 'disabled' : ''} class="w-full md:w-auto px-6 py-2.5 rounded-full text-lg font-bold transition-all shadow-md flex items-center justify-center gap-2 whitespace-nowrap ${canSubmit ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white hover:scale-105 active:scale-95 animate-bounce' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}">
                 투자 확정하기 <i class="fa-solid fa-arrow-right"></i>
               </button>
             </div>
-            ${warningHtml} ${errorHtml}
+
+            ${warningHtml}
+            ${errorHtml}
           </div>
-          
+
           <div class="bg-yellow-50 border border-yellow-200 text-yellow-700 p-4 rounded-2xl mb-8 flex items-start gap-3 shadow-sm">
             <i class="fa-solid fa-circle-exclamation text-xl mt-1 shrink-0"></i>
+
             <p class="text-base md:text-lg">
-              <strong>${state.myClass}반</strong> 소속이시군요! 본인 반에는 투자할 수 없습니다.<br/>
+              <strong>${state.myClass}반</strong> 소속이시군요! 본인 반에는 투자할 수 없습니다.<br>
               100만원 단위로 분배하여 <strong>정확히 3팀</strong>에게 1,000만원을 투자하되, 1/2/3등을 가릴 수 있도록 <strong>세 팀의 투자 금액은 모두 다르게</strong> 설정해주세요.
             </p>
           </div>
-          
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">${teamsHtml}</div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            ${teamsHtml}
+          </div>
         </div>
       `;
     }
@@ -404,14 +523,16 @@
     function renderResult() {
       const sortedTeams = TEAMS.map(team => ({
         ...team,
-        total: state.globalTotals[team.id] || 0
+        total: Number(state.globalTotals[team.id] || 0)
       })).sort((a, b) => b.total - a.total);
 
-      const maxTotal = Math.max(...Object.values(state.globalTotals).concat([TOTAL_BUDGET]));
+      const maxTotal = Math.max(...Object.values(state.globalTotals).map(v => Number(v || 0)).concat([TOTAL_BUDGET]));
 
       let ranksHtml = '';
+
       sortedTeams.forEach((team, index) => {
         const percentage = (team.total / (maxTotal || 1)) * 100;
+
         let rankIcon = `<span class="w-8 h-8 flex items-center justify-center bg-slate-200 rounded-full text-slate-600 font-bold">${index + 1}</span>`;
         let cardStyle = "bg-white border border-slate-100 p-4 rounded-2xl shadow-sm mb-4 transition-all";
         let barColor = "bg-gradient-to-r from-blue-400 to-cyan-300";
@@ -438,11 +559,13 @@
           <div class="${cardStyle}" style="transition-duration: 800ms">
             <div class="flex items-center gap-4 mb-3">
               <div class="w-10 text-center shrink-0">${rankIcon}</div>
+
               <div class="flex-1 font-bold text-slate-700 flex justify-between items-center">
                 <span class="${titleColor} whitespace-nowrap">${team.id}반</span>
                 <span class="font-black ${amtColor} whitespace-nowrap">${window.formatMoney(team.total)}</span>
               </div>
             </div>
+
             <div class="ml-14 h-4 md:h-6 bg-slate-100 rounded-full overflow-hidden shadow-inner">
               <div class="h-full rounded-full transition-all duration-1000 relative overflow-hidden ${barColor}" style="width: ${Math.max(percentage, 1)}%">
                 <div class="absolute top-0 left-0 right-0 bottom-0 bg-white/30 -skew-x-12 translate-x-[-100%] animate-shimmer"></div>
@@ -453,14 +576,21 @@
       });
 
       let myInvestmentsHtml = '';
-      if(Object.keys(state.investments).length > 0) {
-        Object.entries(state.investments).filter(([_, amount]) => amount > 0).forEach(([classId, amount]) => {
-          myInvestmentsHtml += `<span class="bg-white px-4 py-2 rounded-full shadow-sm text-slate-700 font-bold border border-blue-100 whitespace-nowrap">${classId}반 : <span class="text-blue-600">${window.formatMoney(amount)}</span></span>`;
-        });
+
+      if (Object.keys(state.investments).length > 0) {
+        Object.entries(state.investments)
+          .filter(([_, amount]) => amount > 0)
+          .forEach(([classId, amount]) => {
+            myInvestmentsHtml += `
+              <span class="bg-white px-4 py-2 rounded-full shadow-sm text-slate-700 font-bold border border-blue-100 whitespace-nowrap">
+                ${classId}반 : <span class="text-blue-600">${window.formatMoney(amount)}</span>
+              </span>
+            `;
+          });
       } else {
         myInvestmentsHtml = `<span class="text-slate-400">투자 내역이 없습니다.</span>`;
       }
-      
+
       const isClosed = state.status === 'CLOSED';
 
       return `
@@ -470,36 +600,42 @@
               <i class="fa-solid fa-arrow-trend-up text-6xl text-blue-500 mb-4 animate-pulse drop-shadow-md"></i>
               <i class="fa-solid fa-wand-magic-sparkles text-2xl text-yellow-400 absolute top-0 right-[-10px] animate-ping"></i>
             </div>
+
             <h2 class="text-3xl font-bold text-slate-800 mb-2">🔥 실시간 투자 랭킹 현황 🔥</h2>
             <p class="text-slate-500">구글 시트와 동기화되어 실시간으로 반영됩니다!</p>
           </div>
-          
-          <div class="space-y-4 relative">${ranksHtml}</div>
-          
+
+          <div class="space-y-4 relative">
+            ${ranksHtml}
+          </div>
+
           <div class="mt-12 bg-blue-50 text-blue-700 p-6 rounded-2xl text-center shadow-inner">
             <i class="fa-solid fa-coins text-4xl mb-2 text-yellow-500 block"></i>
+
             <p class="text-xl font-bold mb-4">내가 투자한 내역</p>
-            <div class="flex flex-wrap justify-center gap-3">${myInvestmentsHtml}</div>
+
+            <div class="flex flex-wrap justify-center gap-3">
+              ${myInvestmentsHtml}
+            </div>
           </div>
-          
+
           ${!isClosed ? `
-          <div class="mt-8 text-center">
-            <button onclick="goToEdit()" class="inline-flex items-center gap-2 px-6 py-3 bg-white border-2 border-slate-200 rounded-full text-slate-600 font-bold hover:bg-slate-50 hover:text-blue-600 shadow-sm transition-colors">
-              <i class="fa-solid fa-pen-to-square"></i> 내 투표 수정하기
-            </button>
-          </div>
+            <div class="mt-8 text-center">
+              <button onclick="goToEdit()" class="inline-flex items-center gap-2 px-6 py-3 bg-white border-2 border-slate-200 rounded-full text-slate-600 font-bold hover:bg-slate-50 hover:text-blue-600 shadow-sm transition-colors">
+                <i class="fa-solid fa-pen-to-square"></i> 내 투표 수정하기
+              </button>
+            </div>
           ` : `
-          <div class="mt-8 text-center">
-            <p class="text-red-500 font-bold bg-red-50 p-3 rounded-xl border border-red-200">
-              투표가 마감되어 결과를 수정할 수 없습니다.
-            </p>
-          </div>
+            <div class="mt-8 text-center">
+              <p class="text-red-500 font-bold bg-red-50 p-3 rounded-xl border border-red-200">
+                투표가 마감되어 결과를 수정할 수 없습니다.
+              </p>
+            </div>
           `}
         </div>
       `;
     }
 
-    // 실행 시작
     init();
   </script>
 </body>
