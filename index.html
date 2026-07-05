@@ -16,6 +16,16 @@
     .glass-panel { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(12px); }
     @keyframes shimmer { 100% { transform: translateX(100%); } }
     .animate-shimmer { animation: shimmer 2s infinite; }
+
+    @keyframes countdownPop {
+      0% { transform: scale(0.6); opacity: 0; }
+      35% { transform: scale(1.25); opacity: 1; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    .countdown-pop {
+      animation: countdownPop 0.8s ease-out;
+    }
   </style>
 </head>
 
@@ -38,7 +48,8 @@
       errorMsg: null,
       pollingInterval: null,
       status: "OPEN",
-      adminOpen: false
+      adminOpen: false,
+      countdown: 5
     };
 
     localStorage.setItem("myeongji_uid", state.userId);
@@ -46,6 +57,10 @@
     const TEAMS = Array.from({ length: 10 }, (_, i) => ({ id: i + 1, name: `${i + 1}반` }));
     const TOTAL_BUDGET = 10000000;
     const UNIT = 1000000;
+
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
 
     function emptyVotedClasses() {
       const votedClasses = {};
@@ -112,11 +127,11 @@
       render();
 
       state.pollingInterval = setInterval(async () => {
-        if (state.step === "vote" || state.submitting) return;
+        if (state.step === "vote" || state.step === "countdown" || state.submitting) return;
 
         await loadGlobalTotals();
 
-        if (state.step === "intro" || state.step === "result" || state.status === "CLOSED") {
+        if (state.step === "intro" || state.step === "complete") {
           render();
         }
       }, 5000);
@@ -172,7 +187,7 @@ ${summaryLines}
 
       if (localStorage.getItem("myeongji_my_vote")) {
         alert("이미 이 기기에서 투표를 완료했습니다. 한 번 제출한 투표는 수정할 수 없습니다.");
-        state.step = "result";
+        state.step = "complete";
         render();
         return;
       }
@@ -240,7 +255,7 @@ ${summaryLines}
 
       if (localStorage.getItem("myeongji_my_vote")) {
         alert("이미 이 기기에서 투표를 완료했습니다. 한 번 제출한 투표는 수정할 수 없습니다.");
-        state.step = "result";
+        state.step = "complete";
         render();
         return;
       }
@@ -313,9 +328,9 @@ ${summaryLines}
           state.votedClasses = result.votedClasses || emptyVotedClasses();
           state.votedClasses[String(state.myClass)] = true;
           state.status = result.status || "OPEN";
-          state.step = "result";
+          state.step = "complete";
 
-          alert("투표가 최종 제출되었습니다. 이제 수정할 수 없습니다.");
+          alert("투표가 최종 제출되었습니다.");
         }
 
       } catch (err) {
@@ -359,6 +374,22 @@ ${summaryLines}
       });
     };
 
+    async function runCountdownThenShowResult() {
+      state.loading = false;
+      state.step = "countdown";
+      state.adminOpen = false;
+
+      for (let i = 5; i >= 1; i--) {
+        state.countdown = i;
+        render();
+        await sleep(1000);
+      }
+
+      state.step = "result";
+      state.adminOpen = true;
+      render();
+    }
+
     window.adminCommand = async (cmd) => {
       const confirmMsg = cmd === "close"
         ? "투표를 마감하고 최종 결과를 확인하시겠습니까?"
@@ -388,8 +419,8 @@ ${summaryLines}
           state.status = result.status || "CLOSED";
           state.globalTotals = result.totals || {};
           state.votedClasses = result.votedClasses || state.votedClasses;
-          state.step = "result";
-          alert("투표가 마감되었습니다. 최종 결과를 확인합니다.");
+
+          await runCountdownThenShowResult();
 
         } else if (cmd === "reset") {
           state.step = "intro";
@@ -414,8 +445,10 @@ ${summaryLines}
 
       } finally {
         state.loading = false;
-        state.adminOpen = true;
-        render();
+        if (cmd !== "close") {
+          state.adminOpen = true;
+          render();
+        }
       }
     };
 
@@ -451,6 +484,10 @@ ${summaryLines}
         html += renderIntro();
       } else if (state.step === "vote") {
         html += renderVote();
+      } else if (state.step === "complete") {
+        html += renderComplete();
+      } else if (state.step === "countdown") {
+        html += renderCountdown();
       } else if (state.step === "result") {
         html += renderResult();
       }
@@ -668,6 +705,58 @@ ${summaryLines}
       `;
     }
 
+    function renderComplete() {
+      return `
+        <div class="bg-white rounded-3xl shadow-xl p-8 md:p-12 text-center animate-fade-in">
+          <div class="inline-flex items-center justify-center w-24 h-24 bg-green-100 text-green-600 rounded-full mb-6 shadow-md">
+            <i class="fa-solid fa-circle-check text-6xl"></i>
+          </div>
+
+          <h2 class="text-4xl font-bold text-slate-800 mb-4">투표 완료</h2>
+
+          <p class="text-xl text-slate-500 leading-relaxed mb-8">
+            소중한 투표가 정상적으로 제출되었습니다.<br>
+            한 번 제출한 투표는 수정할 수 없습니다.<br>
+            최종 결과는 선생님이 투표를 마감한 후 공개됩니다.
+          </p>
+
+          <div class="bg-blue-50 border border-blue-200 text-blue-700 p-5 rounded-2xl max-w-md mx-auto">
+            <i class="fa-solid fa-lock text-2xl mb-2 block"></i>
+            <p class="font-bold">
+              ${state.myClass ? `${state.myClass}반 투표가 완료되었습니다.` : "투표가 완료되었습니다."}
+            </p>
+            <p class="text-sm mt-1 text-blue-500">
+              결과 화면은 아직 공개되지 않습니다.
+            </p>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderCountdown() {
+      return `
+        <div class="min-h-[60vh] flex items-center justify-center">
+          <div class="bg-gradient-to-br from-indigo-600 to-blue-500 text-white rounded-[2rem] shadow-2xl p-10 md:p-16 text-center w-full max-w-2xl">
+            <p class="text-xl md:text-2xl text-blue-100 mb-4">최종 결과 공개까지</p>
+
+            <div class="countdown-pop text-[9rem] md:text-[12rem] leading-none font-black drop-shadow-lg" key="${state.countdown}">
+              ${state.countdown}
+            </div>
+
+            <p class="text-2xl md:text-4xl font-bold mt-6 animate-pulse">
+              두근두근... 결과를 공개합니다!
+            </p>
+
+            <div class="mt-8 flex justify-center gap-3 text-yellow-300 text-3xl">
+              <i class="fa-solid fa-star"></i>
+              <i class="fa-solid fa-trophy"></i>
+              <i class="fa-solid fa-star"></i>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     function renderResult() {
       const isClosed = state.status === "CLOSED";
 
@@ -728,23 +817,6 @@ ${summaryLines}
         `;
       });
 
-      let myInvestmentsHtml = "";
-
-      if (Object.keys(state.investments).length > 0) {
-        Object.entries(state.investments)
-          .filter(([_, amount]) => amount > 0)
-          .sort((a, b) => b[1] - a[1])
-          .forEach(([classId, amount], index) => {
-            myInvestmentsHtml += `
-              <span class="bg-white px-4 py-2 rounded-full shadow-sm text-slate-700 font-bold border border-blue-100 whitespace-nowrap">
-                ${index + 1}순위 ${classId}반 : <span class="text-blue-600">${window.formatMoney(amount)}</span>
-              </span>
-            `;
-          });
-      } else {
-        myInvestmentsHtml = `<span class="text-slate-400">투자 내역이 없습니다.</span>`;
-      }
-
       return `
         <div class="bg-white rounded-3xl shadow-xl p-6 md:p-10 animate-fade-in">
           <div class="text-center mb-10">
@@ -754,11 +826,11 @@ ${summaryLines}
             </div>
 
             <h2 class="text-3xl font-bold text-slate-800 mb-2">
-              ${isClosed ? "🏆 최종 투자 결과 🏆" : "🔥 투표 제출 완료 🔥"}
+              🏆 최종 투자 결과 🏆
             </h2>
 
             <p class="text-slate-500">
-              ${isClosed ? "투표가 마감되었습니다. 구글 시트 기준 최종 집계 결과입니다!" : "내 투표가 제출되었습니다. 한 번 제출한 투표는 수정할 수 없습니다."}
+              투표가 마감되었습니다. 구글 시트 기준 최종 집계 결과입니다!
             </p>
           </div>
 
@@ -766,31 +838,11 @@ ${summaryLines}
             ${ranksHtml}
           </div>
 
-          ${!isClosed ? `
-            <div class="mt-12 bg-blue-50 text-blue-700 p-6 rounded-2xl text-center shadow-inner">
-              <i class="fa-solid fa-coins text-4xl mb-2 text-yellow-500 block"></i>
-
-              <p class="text-xl font-bold mb-4">내가 투자한 내역</p>
-
-              <div class="flex flex-wrap justify-center gap-3">
-                ${myInvestmentsHtml}
-              </div>
-            </div>
-          ` : ""}
-
-          ${!isClosed ? `
-            <div class="mt-8 text-center">
-              <p class="text-blue-600 font-bold bg-blue-50 p-3 rounded-xl border border-blue-200">
-                투표가 제출되었습니다. 한 번 제출한 투표는 수정할 수 없습니다.
-              </p>
-            </div>
-          ` : `
-            <div class="mt-8 text-center">
-              <p class="text-red-500 font-bold bg-red-50 p-3 rounded-xl border border-red-200">
-                투표가 마감되었습니다. 위 화면은 최종 집계 결과입니다.
-              </p>
-            </div>
-          `}
+          <div class="mt-8 text-center">
+            <p class="text-red-500 font-bold bg-red-50 p-3 rounded-xl border border-red-200">
+              투표가 마감되었습니다. 위 화면은 최종 집계 결과입니다.
+            </p>
+          </div>
         </div>
       `;
     }
