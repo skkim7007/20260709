@@ -70,10 +70,6 @@
             localStorage.removeItem("myeongji_my_vote");
             state.investments = {};
             state.myClass = null;
-
-            if (state.status === "OPEN") {
-              state.step = "intro";
-            }
           }
         }
 
@@ -94,19 +90,13 @@
           state.myClass = parsed.myClass;
           state.investments = parsed.investments || {};
         } catch (e) {
+          state.myClass = null;
           state.investments = {};
         }
-
-        state.step = "result";
-
-      } else if (state.status === "CLOSED") {
-        state.step = "result";
-
-      } else {
-        state.step = "intro";
-        state.myClass = null;
-        state.investments = {};
       }
+
+      // 주소로 처음 들어오면 항상 초기 화면이 뜨도록 고정
+      state.step = "intro";
 
       state.loading = false;
       render();
