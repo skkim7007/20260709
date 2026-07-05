@@ -20,7 +20,7 @@
   <div id="app"></div>
 
   <script>
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbxduMg1yfs-m06WAOqbI7mTamKN876bNnY3H_mTl9ZTXtYS1iq6YdvDuhH2vE9k0QDJrw/exec";
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbww6niGb76_b_ADZdQb_86wbOTLXF7Cf8t0mpfGC7In5lyYarcXe6c8iVAqHHHVajVa/exec";
 
     const STORAGE_UID = "myeongji_uid";
     const STORAGE_VOTE = "myeongji_my_vote";
@@ -151,16 +151,6 @@
       render();
     };
 
-    window.goToEdit = () => {
-      if (state.status === "CLOSED") {
-        alert("투표가 마감되어 수정할 수 없습니다.");
-        return;
-      }
-      state.errorMsg = null;
-      state.step = "vote";
-      render();
-    };
-
     window.handleInvest = (teamId, amount) => {
       if (teamId === state.myClass) return;
 
@@ -275,7 +265,7 @@
       const messages = {
         close: "투표를 마감하고 결과 화면으로 전환할까요?",
         open: "투표를 다시 열까요?",
-        dedupe: "같은 반의 중복 기록이 있다면 최신 1건만 남길까요?",
+        dedupe: "같은 반의 중복 기록이 있다면 첫 투표 1건만 남길까요?",
         reset: "모든 투표 데이터를 삭제하고 처음부터 다시 시작할까요? 이 작업은 되돌릴 수 없습니다."
       };
 
@@ -573,7 +563,7 @@
               <i class="fa-solid fa-arrow-trend-up text-6xl text-blue-500 mb-4 animate-pulse drop-shadow-md"></i>
             </div>
             <h2 class="text-3xl font-bold text-slate-800 mb-2">실시간 투자 현황</h2>
-            <p class="text-slate-500">같은 반의 중복 기록은 최신 1건만 집계됩니다.</p>
+            <p class="text-slate-500">같은 반의 중복 기록은 첫 투표 1건만 집계됩니다.</p>
           </div>
 
           <div class="space-y-4 relative">${ranksHtml}</div>
@@ -584,19 +574,11 @@
             <div class="flex flex-wrap justify-center gap-3">${myInvestmentsHtml}</div>
           </div>
 
-          ${!isClosed && state.myClass ? `
-            <div class="mt-8 text-center">
-              <button onclick="goToEdit()" class="inline-flex items-center gap-2 px-6 py-3 bg-white border-2 border-slate-200 rounded-full text-slate-600 font-bold hover:bg-slate-50 hover:text-blue-600 shadow-sm transition-colors">
-                <i class="fa-solid fa-pen-to-square"></i> 내 투표 수정하기
-              </button>
-            </div>
-          ` : `
-            <div class="mt-8 text-center">
-              <p class="${isClosed ? "text-red-500 bg-red-50 border-red-200" : "text-slate-500 bg-slate-50 border-slate-200"} font-bold p-3 rounded-lg border">
-                ${isClosed ? "투표가 마감되어 결과가 확정되었습니다." : "반을 선택하면 투표할 수 있습니다."}
-              </p>
-            </div>
-          `}
+          <div class="mt-8 text-center">
+            <p class="${isClosed ? "text-red-500 bg-red-50 border-red-200" : "text-slate-500 bg-slate-50 border-slate-200"} font-bold p-3 rounded-lg border">
+              ${isClosed ? "투표가 마감되어 결과가 확정되었습니다." : state.myClass ? "제출한 투표는 수정할 수 없습니다." : "반을 선택하면 투표할 수 있습니다."}
+            </p>
+          </div>
         </section>
       `;
     }
