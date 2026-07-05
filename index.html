@@ -88,17 +88,18 @@
 
       const savedVote = localStorage.getItem("myeongji_my_vote");
 
-      if (state.status === "CLOSED") {
-        if (savedVote) {
-          try {
-            const parsed = JSON.parse(savedVote);
-            state.myClass = parsed.myClass;
-            state.investments = parsed.investments || {};
-          } catch (e) {
-            state.investments = {};
-          }
+      if (savedVote) {
+        try {
+          const parsed = JSON.parse(savedVote);
+          state.myClass = parsed.myClass;
+          state.investments = parsed.investments || {};
+        } catch (e) {
+          state.investments = {};
         }
 
+        state.step = "result";
+
+      } else if (state.status === "CLOSED") {
         state.step = "result";
 
       } else {
@@ -123,9 +124,43 @@
       return `${(num / 10000).toLocaleString()}만원`;
     };
 
+    function buildVoteSummaryMessage() {
+      const selected = Object.entries(state.investments)
+        .filter(([_, amount]) => amount > 0)
+        .sort((a, b) => b[1] - a[1]);
+
+      const summaryLines = selected
+        .map(([classId, amount], index) => {
+          return `${index + 1}순위: ${classId}반 - ${window.formatMoney(amount)}`;
+        })
+        .join("\n");
+
+      const totalInvested = selected.reduce((sum, [_, amount]) => sum + amount, 0);
+
+      return `[최종 제출 확인]
+
+한 번 제출하면 수정할 수 없습니다.
+
+내 소속 반: ${state.myClass}반
+
+투표 내용:
+${summaryLines}
+
+총 투자금: ${window.formatMoney(totalInvested)}
+
+이대로 최종 제출하시겠습니까?`;
+    }
+
     window.handleStart = (classNum) => {
       if (state.status === "CLOSED") {
         alert("투표가 이미 마감되었습니다!");
+        return;
+      }
+
+      if (localStorage.getItem("myeongji_my_vote")) {
+        alert("이미 투표를 완료했습니다. 한 번 제출한 투표는 수정할 수 없습니다.");
+        state.step = "result";
+        render();
         return;
       }
 
@@ -139,16 +174,6 @@
       state.step = "intro";
       state.myClass = null;
       state.investments = {};
-      render();
-    };
-
-    window.goToEdit = () => {
-      if (state.status === "CLOSED") {
-        alert("투표가 마감되어 수정할 수 없습니다.");
-        return;
-      }
-
-      state.step = "vote";
       render();
     };
 
@@ -173,6 +198,38 @@
     };
 
     window.handleSubmitVote = async () => {
+      const selected = Object.entries(state.investments).filter(([_, amount]) => amount > 0);
+      const totalInvested = selected.reduce((sum, [_, amount]) => sum + amount, 0);
+      const uniqueAmounts = new Set(selected.map(([_, amount]) => amount));
+
+      if (localStorage.getItem("myeongji_my_vote")) {
+        alert("이미 투표를 완료했습니다. 한 번 제출한 투표는 수정할 수 없습니다.");
+        state.step = "result";
+        render();
+        return;
+      }
+
+      if (selected.length !== 3) {
+        alert("정확히 3개의 반에 투자해야 합니다.");
+        return;
+      }
+
+      if (totalInvested !== TOTAL_BUDGET) {
+        alert("1,000만원을 모두 사용해야 합니다.");
+        return;
+      }
+
+      if (uniqueAmounts.size !== selected.length) {
+        alert("세 팀의 투자 금액은 모두 달라야 합니다.");
+        return;
+      }
+
+      const confirmed = confirm(buildVoteSummaryMessage());
+
+      if (!confirmed) {
+        return;
+      }
+
       state.loading = true;
       state.errorMsg = null;
       render();
@@ -196,6 +253,7 @@
 
         if (result.error) {
           state.errorMsg = result.error;
+          alert(result.error);
 
         } else if (result.result === "success") {
           localStorage.setItem(
@@ -209,6 +267,8 @@
           state.globalTotals = result.totals || {};
           state.status = result.status || "OPEN";
           state.step = "result";
+
+          alert("투표가 최종 제출되었습니다. 이제 수정할 수 없습니다.");
         }
 
       } catch (err) {
@@ -233,7 +293,7 @@
 
     window.adminCommand = async (cmd) => {
       const confirmMsg = cmd === "close"
-        ? "투표를 마감하고 결과를 확인하시겠습니까?"
+        ? "투표를 마감하고 최종 결과를 확인하시겠습니까?"
         : cmd === "reset"
           ? "구글 시트의 모든 투표 데이터를 삭제하고 초기화하시겠습니까? (복구 불가)"
           : "";
@@ -259,7 +319,7 @@
           state.status = result.status || "CLOSED";
           state.globalTotals = result.totals || {};
           state.step = "result";
-          alert("투표가 마감되었습니다. 결과를 확인합니다.");
+          alert("투표가 마감되었습니다. 최종 결과를 확인합니다.");
 
         } else if (cmd === "reset") {
           state.step = "intro";
@@ -338,7 +398,7 @@
           </h3>
 
           <button onclick="adminCommand('close')" class="w-full mb-3 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold animate-pulse shadow-md transition-colors">
-            <i class="fa-solid fa-stopwatch"></i> 투표 마감 및 결과 확인
+            <i class="fa-solid fa-stopwatch"></i> 투표 마감 및 최종 결과 확인
           </button>
 
           <hr class="my-3 border-slate-200">
@@ -509,7 +569,8 @@
 
             <p class="text-base md:text-lg">
               <strong>${state.myClass}반</strong> 소속이시군요! 본인 반에는 투자할 수 없습니다.<br>
-              100만원 단위로 분배하여 <strong>정확히 3팀</strong>에게 1,000만원을 투자하되, 1/2/3등을 가릴 수 있도록 <strong>세 팀의 투자 금액은 모두 다르게</strong> 설정해주세요.
+              100만원 단위로 분배하여 <strong>정확히 3팀</strong>에게 1,000만원을 투자하되, 1/2/3등을 가릴 수 있도록 <strong>세 팀의 투자 금액은 모두 다르게</strong> 설정해주세요.<br>
+              <span class="text-red-500 font-bold">※ 한 번 제출하면 수정할 수 없습니다.</span>
             </p>
           </div>
 
@@ -521,6 +582,8 @@
     }
 
     function renderResult() {
+      const isClosed = state.status === "CLOSED";
+
       const sortedTeams = TEAMS.map(team => ({
         ...team,
         total: Number(state.globalTotals[String(team.id)] || state.globalTotals[team.id] || 0)
@@ -583,18 +646,17 @@
       if (Object.keys(state.investments).length > 0) {
         Object.entries(state.investments)
           .filter(([_, amount]) => amount > 0)
-          .forEach(([classId, amount]) => {
+          .sort((a, b) => b[1] - a[1])
+          .forEach(([classId, amount], index) => {
             myInvestmentsHtml += `
               <span class="bg-white px-4 py-2 rounded-full shadow-sm text-slate-700 font-bold border border-blue-100 whitespace-nowrap">
-                ${classId}반 : <span class="text-blue-600">${window.formatMoney(amount)}</span>
+                ${index + 1}순위 ${classId}반 : <span class="text-blue-600">${window.formatMoney(amount)}</span>
               </span>
             `;
           });
       } else {
         myInvestmentsHtml = `<span class="text-slate-400">투자 내역이 없습니다.</span>`;
       }
-
-      const isClosed = state.status === "CLOSED";
 
       return `
         <div class="bg-white rounded-3xl shadow-xl p-6 md:p-10 animate-fade-in">
@@ -604,8 +666,13 @@
               <i class="fa-solid fa-wand-magic-sparkles text-2xl text-yellow-400 absolute top-0 right-[-10px] animate-ping"></i>
             </div>
 
-            <h2 class="text-3xl font-bold text-slate-800 mb-2">🔥 실시간 투자 랭킹 현황 🔥</h2>
-            <p class="text-slate-500">구글 시트와 동기화되어 실시간으로 반영됩니다!</p>
+            <h2 class="text-3xl font-bold text-slate-800 mb-2">
+              ${isClosed ? "🏆 최종 투자 결과 🏆" : "🔥 투표 제출 완료 🔥"}
+            </h2>
+
+            <p class="text-slate-500">
+              ${isClosed ? "투표가 마감되었습니다. 구글 시트 기준 최종 집계 결과입니다!" : "내 투표가 제출되었습니다. 한 번 제출한 투표는 수정할 수 없습니다."}
+            </p>
           </div>
 
           <div class="space-y-4 relative">
@@ -624,14 +691,14 @@
 
           ${!isClosed ? `
             <div class="mt-8 text-center">
-              <button onclick="goToEdit()" class="inline-flex items-center gap-2 px-6 py-3 bg-white border-2 border-slate-200 rounded-full text-slate-600 font-bold hover:bg-slate-50 hover:text-blue-600 shadow-sm transition-colors">
-                <i class="fa-solid fa-pen-to-square"></i> 내 투표 수정하기
-              </button>
+              <p class="text-blue-600 font-bold bg-blue-50 p-3 rounded-xl border border-blue-200">
+                투표가 제출되었습니다. 한 번 제출한 투표는 수정할 수 없습니다.
+              </p>
             </div>
           ` : `
             <div class="mt-8 text-center">
               <p class="text-red-500 font-bold bg-red-50 p-3 rounded-xl border border-red-200">
-                투표가 마감되어 결과를 수정할 수 없습니다.
+                투표가 마감되었습니다. 위 화면은 최종 집계 결과입니다.
               </p>
             </div>
           `}
