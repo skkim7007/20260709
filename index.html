@@ -34,9 +34,11 @@
       globalTotals: {},
       votedClasses: {},
       loading: true,
+      submitting: false,
       errorMsg: null,
       pollingInterval: null,
-      status: "OPEN"
+      status: "OPEN",
+      adminOpen: false
     };
 
     localStorage.setItem("myeongji_uid", state.userId);
@@ -105,9 +107,7 @@
         }
       }
 
-      // 주소로 들어오면 항상 초기 화면
       state.step = "intro";
-
       state.loading = false;
       render();
 
@@ -183,7 +183,8 @@ ${summaryLines}
       render();
     };
 
-    window.goBackToIntro = () => {
+    window.goBackToIntro = async () => {
+      await loadGlobalTotals();
       state.step = "intro";
       state.myClass = null;
       state.investments = {};
@@ -211,25 +212,15 @@ ${summaryLines}
     };
 
     window.handleSubmitVote = async () => {
-      await loadGlobalTotals();
+      if (state.submitting) return;
 
       const selected = Object.entries(state.investments).filter(([_, amount]) => amount > 0);
       const totalInvested = selected.reduce((sum, [_, amount]) => sum + amount, 0);
       const uniqueAmounts = new Set(selected.map(([_, amount]) => amount));
-      const myClassKey = String(state.myClass);
 
       if (state.status === "CLOSED") {
         alert("투표가 이미 마감되었습니다.");
         state.step = "intro";
-        render();
-        return;
-      }
-
-      if (state.votedClasses[myClassKey]) {
-        alert(`${state.myClass}반은 이미 투표를 완료했습니다. 한 반은 한 번만 투표할 수 있습니다.`);
-        state.step = "intro";
-        state.myClass = null;
-        state.investments = {};
         render();
         return;
       }
@@ -262,6 +253,7 @@ ${summaryLines}
         return;
       }
 
+      state.submitting = true;
       state.loading = true;
       state.errorMsg = null;
       render();
@@ -306,6 +298,7 @@ ${summaryLines}
 
           state.globalTotals = result.totals || {};
           state.votedClasses = result.votedClasses || emptyVotedClasses();
+          state.votedClasses[String(state.myClass)] = true;
           state.status = result.status || "OPEN";
           state.step = "result";
 
@@ -316,17 +309,24 @@ ${summaryLines}
         state.errorMsg = "네트워크 오류가 발생했습니다. Apps Script 웹앱 URL을 확인해주세요.";
 
       } finally {
+        state.submitting = false;
         state.loading = false;
         render();
       }
     };
 
     window.toggleAdmin = () => {
+      if (state.adminOpen) {
+        state.adminOpen = false;
+        render();
+        return;
+      }
+
       const p = prompt("관리자 비밀번호를 입력하세요");
 
       if (p === "1700") {
-        const panel = document.getElementById("admin-panel");
-        if (panel) panel.classList.toggle("hidden");
+        state.adminOpen = true;
+        render();
       } else if (p) {
         alert("비밀번호가 틀렸습니다.");
       }
@@ -339,6 +339,7 @@ ${summaryLines}
       state.myClass = null;
       state.investments = {};
       state.errorMsg = null;
+      state.adminOpen = true;
 
       render();
     };
@@ -353,6 +354,7 @@ ${summaryLines}
       if (!confirm(confirmMsg)) return;
 
       state.loading = true;
+      state.adminOpen = true;
       render();
 
       try {
@@ -397,6 +399,7 @@ ${summaryLines}
 
       } finally {
         state.loading = false;
+        state.adminOpen = true;
         render();
       }
     };
@@ -446,7 +449,7 @@ ${summaryLines}
           </button>
         </div>
 
-        <div id="admin-panel" class="hidden fixed bottom-20 right-4 bg-white border-2 border-slate-800 p-5 rounded-2xl shadow-2xl z-50 w-72 text-left">
+        <div id="admin-panel" class="${state.adminOpen ? "" : "hidden"} fixed bottom-20 right-4 bg-white border-2 border-slate-800 p-5 rounded-2xl shadow-2xl z-50 w-72 text-left">
           <h3 class="font-bold text-lg mb-4 text-slate-800">
             <i class="fa-solid fa-user-tie"></i> 선생님 관리자 메뉴
           </h3>
@@ -624,8 +627,8 @@ ${summaryLines}
                 </div>
               </div>
 
-              <button onclick="handleSubmitVote()" ${!canSubmit ? "disabled" : ""} class="w-full md:w-auto px-6 py-2.5 rounded-full text-lg font-bold transition-all shadow-md flex items-center justify-center gap-2 whitespace-nowrap ${canSubmit ? "bg-gradient-to-r from-blue-500 to-indigo-500 text-white hover:scale-105 active:scale-95 animate-bounce" : "bg-slate-200 text-slate-400 cursor-not-allowed"}">
-                투자 확정하기 <i class="fa-solid fa-arrow-right"></i>
+              <button onclick="handleSubmitVote()" ${!canSubmit || state.submitting ? "disabled" : ""} class="w-full md:w-auto px-6 py-2.5 rounded-full text-lg font-bold transition-all shadow-md flex items-center justify-center gap-2 whitespace-nowrap ${canSubmit && !state.submitting ? "bg-gradient-to-r from-blue-500 to-indigo-500 text-white hover:scale-105 active:scale-95 animate-bounce" : "bg-slate-200 text-slate-400 cursor-not-allowed"}">
+                ${state.submitting ? "제출 중..." : "투자 확정하기"} <i class="fa-solid fa-arrow-right"></i>
               </button>
             </div>
 
