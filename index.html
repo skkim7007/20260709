@@ -27,18 +27,18 @@
     const GAS_URL = "https://script.google.com/macros/s/AKfycbxduMg1yfs-m06WAOqbI7mTamKN876bNnY3H_mTl9ZTXtYS1iq6YdvDuhH2vE9k0QDJrw/exec";
 
     const state = {
-      userId: localStorage.getItem('myeongji_uid') || 'user_' + Math.random().toString(36).substr(2, 9),
-      step: 'intro',
+      userId: localStorage.getItem("myeongji_uid") || "user_" + Math.random().toString(36).substr(2, 9),
+      step: "intro",
       myClass: null,
       investments: {},
       globalTotals: {},
       loading: true,
       errorMsg: null,
       pollingInterval: null,
-      status: 'OPEN'
+      status: "OPEN"
     };
 
-    localStorage.setItem('myeongji_uid', state.userId);
+    localStorage.setItem("myeongji_uid", state.userId);
 
     const TEAMS = Array.from({ length: 10 }, (_, i) => ({ id: i + 1, name: `${i + 1}반` }));
     const TOTAL_BUDGET = 10000000;
@@ -70,7 +70,10 @@
             localStorage.removeItem("myeongji_my_vote");
             state.investments = {};
             state.myClass = null;
-            state.step = "intro";
+
+            if (state.status === "OPEN") {
+              state.step = "intro";
+            }
           }
         }
 
@@ -83,29 +86,32 @@
     async function init() {
       await loadGlobalTotals();
 
-      const savedVote = localStorage.getItem('myeongji_my_vote');
+      const savedVote = localStorage.getItem("myeongji_my_vote");
 
-      if (savedVote && state.status !== "OPEN") {
-        try {
-          const parsed = JSON.parse(savedVote);
-          state.myClass = parsed.myClass;
-          state.investments = parsed.investments || {};
-          state.step = 'result';
-        } catch (e) {}
-      } else if (savedVote && state.status === "OPEN") {
-        try {
-          const parsed = JSON.parse(savedVote);
-          state.myClass = parsed.myClass;
-          state.investments = parsed.investments || {};
-          state.step = 'result';
-        } catch (e) {}
+      if (state.status === "CLOSED") {
+        if (savedVote) {
+          try {
+            const parsed = JSON.parse(savedVote);
+            state.myClass = parsed.myClass;
+            state.investments = parsed.investments || {};
+          } catch (e) {
+            state.investments = {};
+          }
+        }
+
+        state.step = "result";
+
+      } else {
+        state.step = "intro";
+        state.myClass = null;
+        state.investments = {};
       }
 
       state.loading = false;
       render();
 
       state.pollingInterval = setInterval(async () => {
-        if (state.step === 'result' || state.status === 'CLOSED') {
+        if (state.step === "result" || state.status === "CLOSED") {
           await loadGlobalTotals();
           render();
         }
@@ -118,29 +124,31 @@
     };
 
     window.handleStart = (classNum) => {
-      if (state.status === 'CLOSED') {
+      if (state.status === "CLOSED") {
         alert("투표가 이미 마감되었습니다!");
         return;
       }
 
       state.myClass = classNum;
-      state.step = 'vote';
+      state.investments = {};
+      state.step = "vote";
       render();
     };
 
     window.goBackToIntro = () => {
-      state.step = 'intro';
+      state.step = "intro";
+      state.myClass = null;
       state.investments = {};
       render();
     };
 
     window.goToEdit = () => {
-      if (state.status === 'CLOSED') {
+      if (state.status === "CLOSED") {
         alert("투표가 마감되어 수정할 수 없습니다.");
         return;
       }
 
-      state.step = 'vote';
+      state.step = "vote";
       render();
     };
 
@@ -171,15 +179,15 @@
 
       try {
         const payload = {
-          action: 'vote',
+          action: "vote",
           userId: state.userId,
           myClass: state.myClass,
           investments: state.investments
         };
 
         const res = await fetch(GAS_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify(payload),
           cache: "no-store"
         });
@@ -188,6 +196,7 @@
 
         if (result.error) {
           state.errorMsg = result.error;
+
         } else if (result.result === "success") {
           localStorage.setItem(
             "myeongji_my_vote",
@@ -206,8 +215,10 @@
           state.status = result.status || state.status || "OPEN";
           state.step = "result";
         }
+
       } catch (err) {
         state.errorMsg = "네트워크 오류가 발생했습니다. 다시 시도해주세요.";
+
       } finally {
         state.loading = false;
         render();
@@ -218,17 +229,17 @@
       const p = prompt("관리자 비밀번호를 입력하세요");
 
       if (p === "1700") {
-        const panel = document.getElementById('admin-panel');
-        if (panel) panel.classList.toggle('hidden');
+        const panel = document.getElementById("admin-panel");
+        if (panel) panel.classList.toggle("hidden");
       } else if (p) {
         alert("비밀번호가 틀렸습니다.");
       }
     };
 
     window.adminCommand = async (cmd) => {
-      const confirmMsg = cmd === 'close'
+      const confirmMsg = cmd === "close"
         ? "투표를 마감하고 결과를 확인하시겠습니까?"
-        : cmd === 'reset'
+        : cmd === "reset"
           ? "구글 시트의 모든 투표 데이터를 삭제하고 초기화하시겠습니까? (복구 불가)"
           : "";
 
@@ -239,9 +250,9 @@
 
       try {
         const response = await fetch(GAS_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'admin', cmd: cmd }),
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({ action: "admin", cmd: cmd }),
           cache: "no-store"
         });
 
@@ -249,7 +260,7 @@
 
         if (result.error) throw new Error(result.error);
 
-        if (cmd === 'close') {
+        if (cmd === "close") {
           state.status = result.status || "CLOSED";
 
           if (result.totals) {
@@ -261,12 +272,12 @@
           state.step = "result";
           alert("투표가 마감되었습니다. 결과를 확인합니다.");
 
-        } else if (cmd === 'reset') {
+        } else if (cmd === "reset") {
           state.step = "intro";
+          state.myClass = null;
           state.investments = {};
           state.globalTotals = {};
           state.status = "OPEN";
-          state.myClass = null;
           state.errorMsg = null;
 
           localStorage.removeItem("myeongji_my_vote");
@@ -275,27 +286,20 @@
             localStorage.setItem("myeongji_reset_at", result.resetAt);
           }
 
-          await loadGlobalTotals();
-
-          state.step = "intro";
-          state.investments = {};
-          state.globalTotals = {};
-          state.status = "OPEN";
-          state.myClass = null;
-
           alert("투표 결과가 리셋되었습니다.");
         }
 
       } catch (e) {
         alert("오류 발생: " + e.message);
-      }
 
-      state.loading = false;
-      render();
+      } finally {
+        state.loading = false;
+        render();
+      }
     };
 
     function render() {
-      const appDiv = document.getElementById('app');
+      const appDiv = document.getElementById("app");
 
       if (state.loading) {
         appDiv.innerHTML = `
@@ -322,11 +326,11 @@
         <main class="max-w-4xl mx-auto mt-8 px-4 relative">
       `;
 
-      if (state.step === 'intro') {
+      if (state.step === "intro") {
         html += renderIntro();
-      } else if (state.step === 'vote') {
+      } else if (state.step === "vote") {
         html += renderVote();
-      } else if (state.step === 'result') {
+      } else if (state.step === "result") {
         html += renderResult();
       }
 
@@ -360,7 +364,7 @@
     }
 
     function renderIntro() {
-      let buttonsHtml = '';
+      let buttonsHtml = "";
 
       for (let num = 1; num <= 10; num++) {
         buttonsHtml += `
@@ -370,11 +374,11 @@
         `;
       }
 
-      const closedBanner = state.status === 'CLOSED' ? `
+      const closedBanner = state.status === "CLOSED" ? `
         <div class="bg-red-100 text-red-600 p-4 rounded-xl mb-6 font-bold text-lg border-2 border-red-200 animate-pulse">
           🚨 현재 투표가 마감되었습니다! 🚨
         </div>
-      ` : '';
+      ` : "";
 
       return `
         <div class="bg-white rounded-3xl shadow-xl p-8 text-center animate-fade-in">
@@ -412,7 +416,7 @@
       const canSubmit = investedTeamsCount === 3 && remainingBudget === 0 && hasUniqueAmounts;
       const isMaxTeamsReached = investedTeamsCount >= 3;
 
-      let teamsHtml = '';
+      let teamsHtml = "";
 
       TEAMS.forEach(team => {
         const isMyClass = team.id === state.myClass;
@@ -422,24 +426,24 @@
 
         teamsHtml += `
           <div class="bg-white rounded-3xl p-6 shadow-md border-2 transition-all flex flex-col justify-between 
-            ${isMyClass ? 'border-slate-200 opacity-60 bg-slate-50' : 'border-transparent hover:shadow-lg hover:border-blue-200'} ${currentInv > 0 ? 'border-blue-400 bg-blue-50' : ''}">
+            ${isMyClass ? "border-slate-200 opacity-60 bg-slate-50" : "border-transparent hover:shadow-lg hover:border-blue-200"} ${currentInv > 0 ? "border-blue-400 bg-blue-50" : ""}">
 
             <div class="flex justify-between items-start mb-6">
               <div class="bg-blue-100 text-blue-700 px-4 py-2 rounded-full text-xl font-bold">${team.id}반</div>
-              ${isMyClass ? `<span class="text-red-400 text-sm font-bold flex items-center gap-1"><i class="fa-solid fa-circle-exclamation"></i> 투표불가</span>` : ''}
+              ${isMyClass ? `<span class="text-red-400 text-sm font-bold flex items-center gap-1"><i class="fa-solid fa-circle-exclamation"></i> 투표불가</span>` : ""}
             </div>
 
             <div class="bg-slate-100 rounded-2xl p-4 flex items-center justify-between mt-auto">
-              <button onclick="handleInvest(${team.id}, ${-UNIT})" ${disableMinus ? 'disabled' : ''} class="w-12 h-12 rounded-full bg-white shadow flex items-center justify-center text-3xl font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-30 transition-transform active:scale-95">
+              <button onclick="handleInvest(${team.id}, ${-UNIT})" ${disableMinus ? "disabled" : ""} class="w-12 h-12 rounded-full bg-white shadow flex items-center justify-center text-3xl font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-30 transition-transform active:scale-95">
                 -
               </button>
 
               <div class="text-center flex-1">
                 <span class="text-xs text-slate-400 block mb-1">나의 투자금</span>
-                <span class="text-2xl font-bold ${currentInv > 0 ? 'text-blue-600' : 'text-slate-600'}">${window.formatMoney(currentInv)}</span>
+                <span class="text-2xl font-bold ${currentInv > 0 ? "text-blue-600" : "text-slate-600"}">${window.formatMoney(currentInv)}</span>
               </div>
 
-              <button onclick="handleInvest(${team.id}, ${UNIT})" ${disablePlus ? 'disabled' : ''} class="w-12 h-12 rounded-full bg-blue-500 shadow flex items-center justify-center text-3xl font-bold text-white hover:bg-blue-600 disabled:opacity-30 transition-transform active:scale-95">
+              <button onclick="handleInvest(${team.id}, ${UNIT})" ${disablePlus ? "disabled" : ""} class="w-12 h-12 rounded-full bg-blue-500 shadow flex items-center justify-center text-3xl font-bold text-white hover:bg-blue-600 disabled:opacity-30 transition-transform active:scale-95">
                 +
               </button>
             </div>
@@ -451,13 +455,13 @@
         <div class="animate-bounce bg-red-100 border border-red-300 text-red-600 p-3 rounded-xl mt-4 text-center font-bold text-sm md:text-base">
           ⚠️ 투자 금액이 동일한 팀이 있습니다! 순위를 가릴 수 있도록 금액을 다르게 분배해주세요. (예: 500, 300, 200)
         </div>
-      ` : '';
+      ` : "";
 
       const errorHtml = state.errorMsg ? `
         <div class="bg-red-100 text-red-600 p-3 rounded-xl mt-4 text-center font-bold">
           ${state.errorMsg}
         </div>
-      ` : '';
+      ` : "";
 
       return `
         <div class="animate-fade-in">
@@ -475,27 +479,27 @@
 
                 <div class="text-left">
                   <p class="text-xs text-slate-500 whitespace-nowrap">남은 투자금</p>
-                  <p class="text-xl md:text-2xl font-bold whitespace-nowrap ${remainingBudget === 0 ? 'text-green-500' : 'text-blue-600'}">
+                  <p class="text-xl md:text-2xl font-bold whitespace-nowrap ${remainingBudget === 0 ? "text-green-500" : "text-blue-600"}">
                     ${window.formatMoney(remainingBudget)}
                   </p>
                 </div>
               </div>
 
               <div class="flex flex-col sm:flex-row gap-2 sm:gap-4 text-sm md:text-base text-slate-500 justify-center">
-                <div class="flex items-center gap-1.5 whitespace-nowrap ${investedTeamsCount === 3 ? 'text-green-600' : ''}">
+                <div class="flex items-center gap-1.5 whitespace-nowrap ${investedTeamsCount === 3 ? "text-green-600" : ""}">
                   <i class="fa-solid fa-circle-check"></i> 3팀 선택 (${investedTeamsCount}/3)
                 </div>
 
-                <div class="flex items-center gap-1.5 whitespace-nowrap ${remainingBudget === 0 ? 'text-green-600' : ''}">
+                <div class="flex items-center gap-1.5 whitespace-nowrap ${remainingBudget === 0 ? "text-green-600" : ""}">
                   <i class="fa-solid fa-circle-check"></i> 1000만원 모두 사용
                 </div>
 
-                <div class="flex items-center gap-1.5 whitespace-nowrap ${(investedTeamsCount > 1 && hasUniqueAmounts) ? 'text-green-600' : ''}">
+                <div class="flex items-center gap-1.5 whitespace-nowrap ${(investedTeamsCount > 1 && hasUniqueAmounts) ? "text-green-600" : ""}">
                   <i class="fa-solid fa-circle-check"></i> 금액 차등 분배
                 </div>
               </div>
 
-              <button onclick="handleSubmitVote()" ${!canSubmit ? 'disabled' : ''} class="w-full md:w-auto px-6 py-2.5 rounded-full text-lg font-bold transition-all shadow-md flex items-center justify-center gap-2 whitespace-nowrap ${canSubmit ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white hover:scale-105 active:scale-95 animate-bounce' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}">
+              <button onclick="handleSubmitVote()" ${!canSubmit ? "disabled" : ""} class="w-full md:w-auto px-6 py-2.5 rounded-full text-lg font-bold transition-all shadow-md flex items-center justify-center gap-2 whitespace-nowrap ${canSubmit ? "bg-gradient-to-r from-blue-500 to-indigo-500 text-white hover:scale-105 active:scale-95 animate-bounce" : "bg-slate-200 text-slate-400 cursor-not-allowed"}">
                 투자 확정하기 <i class="fa-solid fa-arrow-right"></i>
               </button>
             </div>
@@ -523,12 +527,15 @@
     function renderResult() {
       const sortedTeams = TEAMS.map(team => ({
         ...team,
-        total: Number(state.globalTotals[team.id] || 0)
+        total: Number(state.globalTotals[String(team.id)] || state.globalTotals[team.id] || 0)
       })).sort((a, b) => b.total - a.total);
 
-      const maxTotal = Math.max(...Object.values(state.globalTotals).map(v => Number(v || 0)).concat([TOTAL_BUDGET]));
+      const maxTotal = Math.max(
+        ...Object.values(state.globalTotals).map(v => Number(v || 0)),
+        TOTAL_BUDGET
+      );
 
-      let ranksHtml = '';
+      let ranksHtml = "";
 
       sortedTeams.forEach((team, index) => {
         const percentage = (team.total / (maxTotal || 1)) * 100;
@@ -575,7 +582,7 @@
         `;
       });
 
-      let myInvestmentsHtml = '';
+      let myInvestmentsHtml = "";
 
       if (Object.keys(state.investments).length > 0) {
         Object.entries(state.investments)
@@ -591,7 +598,7 @@
         myInvestmentsHtml = `<span class="text-slate-400">투자 내역이 없습니다.</span>`;
       }
 
-      const isClosed = state.status === 'CLOSED';
+      const isClosed = state.status === "CLOSED";
 
       return `
         <div class="bg-white rounded-3xl shadow-xl p-6 md:p-10 animate-fade-in">
