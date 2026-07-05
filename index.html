@@ -131,8 +131,8 @@
 
     // 선생님 관리자 컨트롤
     window.toggleAdmin = () => {
-      const p = prompt("관리자 비밀번호를 입력하세요 (기본: 0000)");
-      if (p === "0000") {
+      const p = prompt("관리자 비밀번호를 입력하세요 (기본: 1700)");
+      if (p === "1700") {
         document.getElementById('admin-panel').classList.toggle('hidden');
       } else if(p) {
         alert("비밀번호가 틀렸습니다.");
@@ -141,7 +141,7 @@
 
     window.adminCommand = async (cmd) => {
       const confirmMsg = cmd === 'close' ? "투표를 종료하고 결과를 공개하시겠습니까?" : 
-                         cmd === 'reset' ? "모든 데이터를 삭제하시겠습니까?" : "투표를 다시 시작하시겠습니까?";
+                         cmd === 'reset' ? "모든 투표 결과를 초기화(리셋)하시겠습니까? (복구 불가)" : "투표를 다시 시작하시겠습니까?";
       if(!confirm(confirmMsg)) return;
 
       state.loading = true; render();
@@ -203,7 +203,7 @@
           <button onclick="adminCommand('open')" class="w-full mb-2 bg-green-500 text-white py-2 rounded-lg font-bold">▶️ 투표 시작하기 (Open)</button>
           <button onclick="adminCommand('close')" class="w-full mb-2 bg-blue-600 text-white py-2 rounded-lg font-bold animate-pulse">⏹️ 투표 종료 및 결과발표</button>
           <hr class="my-2 border-slate-200">
-          <button onclick="adminCommand('reset')" class="w-full bg-red-500 text-white py-2 rounded-lg font-bold">🗑️ 데이터 초기화</button>
+          <button onclick="adminCommand('reset')" class="w-full bg-red-500 text-white py-2 rounded-lg font-bold">🗑️ 투표 결과 리셋 (데이터 초기화)</button>
         </div>
       `;
 
