@@ -82,6 +82,8 @@
 
     function applyServerState(data) {
       const serverState = data.state || data;
+      const previousStatus = state.status;
+
       state.globalTotals = serverState.totals || {};
       state.votedClasses = serverState.votedClasses || {};
       state.votedClassList = serverState.votedClassList || [];
@@ -89,6 +91,14 @@
       state.status = serverState.status || "OPEN";
       state.electionId = serverState.electionId || null;
       state.updatedAt = serverState.updatedAt || null;
+
+      if (state.status === "CLOSED" && state.step !== "result") {
+        state.step = "result";
+      }
+
+      if (previousStatus === "CLOSED" && state.status === "OPEN" && state.step === "result") {
+        state.step = "intro";
+      }
     }
 
     function restoreSavedVote() {
@@ -104,7 +114,7 @@
 
         state.myClass = Number(parsed.myClass);
         state.investments = parsed.investments || {};
-        state.step = "result";
+        state.step = state.status === "CLOSED" ? "result" : "done";
       } catch (error) {
         localStorage.removeItem(STORAGE_VOTE);
       }
@@ -214,7 +224,7 @@
           }));
 
           await loadGlobalState();
-          state.step = "result";
+          state.step = state.status === "CLOSED" ? "result" : "done";
         }
       } catch (error) {
         state.errorMsg = "네트워크 오류가 발생했습니다. 잠시 뒤 다시 시도해주세요.";
@@ -349,6 +359,7 @@
 
       if (state.step === "intro") html += renderIntro();
       if (state.step === "vote") html += renderVote();
+      if (state.step === "done") html += renderDone();
       if (state.step === "result") html += renderResult();
 
       html += `</main>`;
@@ -499,6 +510,25 @@
       `;
     }
 
+    function renderDone() {
+      return `
+        <section class="bg-white rounded-lg shadow-xl p-8 md:p-12 text-center animate-fade-in">
+          <div class="w-20 h-20 mx-auto mb-6 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center">
+            <i class="fa-solid fa-circle-check text-5xl"></i>
+          </div>
+          <h2 class="text-3xl md:text-4xl font-bold text-slate-800 mb-4">투표 완료</h2>
+          <p class="text-lg text-slate-500 mb-8 leading-relaxed">
+            투표가 정상적으로 제출되었습니다.<br>
+            최종 결과는 선생님이 투표를 마감한 뒤 함께 확인합니다.
+          </p>
+          <div class="inline-flex items-center gap-2 bg-slate-50 border border-slate-200 text-slate-500 px-5 py-3 rounded-full font-bold">
+            <i class="fa-solid fa-hourglass-half"></i>
+            결과 공개 대기 중
+          </div>
+        </section>
+      `;
+    }
+
     function renderResult() {
       const sortedTeams = TEAMS.map((team) => ({
         ...team,
@@ -562,7 +592,7 @@
             <div class="relative inline-block">
               <i class="fa-solid fa-arrow-trend-up text-6xl text-blue-500 mb-4 animate-pulse drop-shadow-md"></i>
             </div>
-            <h2 class="text-3xl font-bold text-slate-800 mb-2">실시간 투자 현황</h2>
+            <h2 class="text-3xl font-bold text-slate-800 mb-2">최종 투자 결과</h2>
             <p class="text-slate-500">같은 반의 중복 기록은 첫 투표 1건만 집계됩니다.</p>
           </div>
 
