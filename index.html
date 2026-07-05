@@ -87,7 +87,7 @@
 
       } catch (e) {
         console.error("데이터 로드 실패:", e);
-        state.errorMsg = "결과 데이터를 불러오지 못했습니다. Apps Script 웹앱 URL을 확인해주세요.";
+        state.errorMsg = "결과 데이터를 불러오지 못했습니다. Apps Script 웹앱 URL 또는 새 버전 배포 여부를 확인해주세요.";
       }
     }
 
@@ -112,6 +112,8 @@
       render();
 
       state.pollingInterval = setInterval(async () => {
+        if (state.step === "vote" || state.submitting) return;
+
         await loadGlobalTotals();
 
         if (state.step === "intro" || state.step === "result" || state.status === "CLOSED") {
@@ -153,9 +155,7 @@ ${summaryLines}
 이대로 최종 제출하시겠습니까?`;
     }
 
-    window.handleStart = async (classNum) => {
-      await loadGlobalTotals();
-
+    window.handleStart = (classNum) => {
       const classKey = String(classNum);
 
       if (state.status === "CLOSED") {
@@ -183,12 +183,15 @@ ${summaryLines}
       render();
     };
 
-    window.goBackToIntro = async () => {
-      await loadGlobalTotals();
+    window.goBackToIntro = () => {
       state.step = "intro";
       state.myClass = null;
       state.investments = {};
       render();
+
+      loadGlobalTotals().then(() => {
+        render();
+      });
     };
 
     window.handleInvest = (teamId, amount) => {
@@ -217,10 +220,20 @@ ${summaryLines}
       const selected = Object.entries(state.investments).filter(([_, amount]) => amount > 0);
       const totalInvested = selected.reduce((sum, [_, amount]) => sum + amount, 0);
       const uniqueAmounts = new Set(selected.map(([_, amount]) => amount));
+      const myClassKey = String(state.myClass);
 
       if (state.status === "CLOSED") {
         alert("투표가 이미 마감되었습니다.");
         state.step = "intro";
+        render();
+        return;
+      }
+
+      if (state.votedClasses[myClassKey]) {
+        alert(`${state.myClass}반은 이미 투표를 완료했습니다. 한 반은 한 번만 투표할 수 있습니다.`);
+        state.step = "intro";
+        state.myClass = null;
+        state.investments = {};
         render();
         return;
       }
@@ -306,7 +319,7 @@ ${summaryLines}
         }
 
       } catch (err) {
-        state.errorMsg = "네트워크 오류가 발생했습니다. Apps Script 웹앱 URL을 확인해주세요.";
+        state.errorMsg = "네트워크 오류가 발생했습니다. Apps Script 웹앱 URL 또는 새 버전 배포 여부를 확인해주세요.";
 
       } finally {
         state.submitting = false;
@@ -332,16 +345,18 @@ ${summaryLines}
       }
     };
 
-    window.adminGoHome = async () => {
-      await loadGlobalTotals();
-
+    window.adminGoHome = () => {
       state.step = "intro";
       state.myClass = null;
       state.investments = {};
       state.errorMsg = null;
       state.adminOpen = true;
-
       render();
+
+      loadGlobalTotals().then(() => {
+        state.adminOpen = true;
+        render();
+      });
     };
 
     window.adminCommand = async (cmd) => {
