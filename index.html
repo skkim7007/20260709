@@ -24,7 +24,7 @@
   <div id="app"></div>
 
   <script>
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbxduMg1yfs-m06WAOqbI7mTamKN876bNnY3H_mTl9ZTXtYS1iq6YdvDuhH2vE9k0QDJrw/exec";
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbxWnUgVH7pJgaA8TaRF_Pvg6tzifWv51jlQbNgrFl_C7KprK9dtqAbMqnpvPxGEuMzB/exec";
 
     const state = {
       userId: localStorage.getItem("myeongji_uid") || "user_" + Math.random().toString(36).substr(2, 9),
@@ -79,7 +79,7 @@
 
       } catch (e) {
         console.error("데이터 로드 실패:", e);
-        state.errorMsg = "결과 데이터를 불러오지 못했습니다.";
+        state.errorMsg = "결과 데이터를 불러오지 못했습니다. Apps Script 웹앱 URL을 확인해주세요.";
       }
     }
 
@@ -206,18 +206,13 @@
             })
           );
 
-          if (result.totals) {
-            state.globalTotals = result.totals;
-          } else {
-            await loadGlobalTotals();
-          }
-
-          state.status = result.status || state.status || "OPEN";
+          state.globalTotals = result.totals || {};
+          state.status = result.status || "OPEN";
           state.step = "result";
         }
 
       } catch (err) {
-        state.errorMsg = "네트워크 오류가 발생했습니다. 다시 시도해주세요.";
+        state.errorMsg = "네트워크 오류가 발생했습니다. Apps Script 웹앱 URL을 확인해주세요.";
 
       } finally {
         state.loading = false;
@@ -262,13 +257,7 @@
 
         if (cmd === "close") {
           state.status = result.status || "CLOSED";
-
-          if (result.totals) {
-            state.globalTotals = result.totals;
-          } else {
-            await loadGlobalTotals();
-          }
-
+          state.globalTotals = result.totals || {};
           state.step = "result";
           alert("투표가 마감되었습니다. 결과를 확인합니다.");
 
@@ -380,6 +369,12 @@
         </div>
       ` : "";
 
+      const errorHtml = state.errorMsg ? `
+        <div class="bg-red-100 text-red-600 p-3 rounded-xl mb-6 font-bold">
+          ${state.errorMsg}
+        </div>
+      ` : "";
+
       return `
         <div class="bg-white rounded-3xl shadow-xl p-8 text-center animate-fade-in">
           <i class="fa-solid fa-trophy text-6xl text-yellow-400 mb-6 drop-shadow-md block"></i>
@@ -392,6 +387,7 @@
             우리 지역사회에 가장 큰 도움이 될 것 같은 <span class="text-blue-500">3개의 반</span>을 골라 자유롭게 투자해주세요!
           </p>
 
+          ${errorHtml}
           ${closedBanner}
 
           <div class="max-w-sm mx-auto">
