@@ -31,6 +31,8 @@
 
     // --- 상태 관리 (State Management) ---
     const state = {
+      // 내 스마트폰/브라우저 고유 ID (투표 수정 시 덮어쓰기에 필요)
+      userId: localStorage.getItem('myeongji_uid') || 'user_' + Math.random().toString(36).substr(2, 9),
       step: 'intro', // 'intro', 'vote', 'result'
       myClass: null,
       investments: {},
@@ -41,6 +43,9 @@
       status: 'OPEN' // OPEN or CLOSED
     };
 
+    // 고유 ID 저장
+    localStorage.setItem('myeongji_uid', state.userId);
+
     const TEAMS = Array.from({length: 10}, (_, i) => ({ id: i + 1, name: `${i + 1}반` }));
     const TOTAL_BUDGET = 10000000;
     const UNIT = 1000000;
@@ -48,7 +53,9 @@
     // --- API 통신 함수 (구글 시트 연동) ---
     async function loadGlobalTotals() {
       try {
-        const res = await fetch(GAS_URL);
+        // ?t= 뒤에 현재 시간을 붙여 브라우저가 과거 데이터를 기억(캐시)하지 못하도록 강제 최신화
+        const urlWithCacheBuster = GAS_URL + "?t=" + new Date().getTime();
+        const res = await fetch(urlWithCacheBuster);
         if (res.ok) {
           const data = await res.json();
           state.globalTotals = data.totals || {};
@@ -63,7 +70,7 @@
     async function init() {
       await loadGlobalTotals();
       
-      // 내 로컬에 저장된 이전 투표 기록이 있으면 결과창으로 바로 이동 (중복투표 방지)
+      // 내 로컬에 저장된 이전 투표 기록이 있으면 결과창으로 바로 이동 (새로고침 시 유지)
       const savedVote = localStorage.getItem('myeongji_my_vote');
       if (savedVote) {
         try {
@@ -142,6 +149,7 @@
       try {
         const payload = {
           action: 'vote',
+          userId: state.userId, // 누구인지 서버에 알려서 덮어쓰기(수정) 처리
           myClass: state.myClass,
           investments: state.investments
         };
@@ -227,7 +235,7 @@
           <div class="min-h-screen flex flex-col items-center justify-center bg-slate-50">
             <div class="animate-pulse flex flex-col items-center">
               <i class="fa-solid fa-wand-magic-sparkles text-5xl mb-4 text-yellow-400"></i>
-              <h2 class="text-4xl font-bold text-blue-600 drop-shadow-sm">로딩중입니다... ✨</h2>
+              <h2 class="text-4xl font-bold text-blue-600 drop-shadow-sm">데이터 통신중... ✨</h2>
             </div>
           </div>
         `;
