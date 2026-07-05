@@ -42,6 +42,8 @@
       submitting: false,
       errorMsg: null,
       pollingInterval: null,
+      countdown: 5,
+      countdownTimer: null,
       status: "OPEN",
       updatedAt: null,
       admin: {
@@ -92,12 +94,39 @@
       state.electionId = serverState.electionId || null;
       state.updatedAt = serverState.updatedAt || null;
 
-      if (state.status === "CLOSED" && state.step !== "result") {
-        state.step = "result";
+      if (state.status === "CLOSED" && state.step !== "result" && state.step !== "countdown") {
+        startResultCountdown();
       }
 
-      if (previousStatus === "CLOSED" && state.status === "OPEN" && state.step === "result") {
+      if (previousStatus === "CLOSED" && state.status === "OPEN" && (state.step === "result" || state.step === "countdown")) {
+        clearResultCountdown();
         state.step = "intro";
+      }
+    }
+
+    function startResultCountdown() {
+      if (state.step === "result" || state.step === "countdown") return;
+
+      clearResultCountdown();
+      state.countdown = 5;
+      state.step = "countdown";
+
+      state.countdownTimer = setInterval(() => {
+        state.countdown -= 1;
+
+        if (state.countdown <= 0) {
+          clearResultCountdown();
+          state.step = "result";
+        }
+
+        render();
+      }, 1000);
+    }
+
+    function clearResultCountdown() {
+      if (state.countdownTimer) {
+        clearInterval(state.countdownTimer);
+        state.countdownTimer = null;
       }
     }
 
@@ -114,7 +143,11 @@
 
         state.myClass = Number(parsed.myClass);
         state.investments = parsed.investments || {};
-        state.step = state.status === "CLOSED" ? "result" : "done";
+        if (state.status === "CLOSED") {
+          startResultCountdown();
+        } else {
+          state.step = "done";
+        }
       } catch (error) {
         localStorage.removeItem(STORAGE_VOTE);
       }
@@ -224,7 +257,11 @@
           }));
 
           await loadGlobalState();
-          state.step = state.status === "CLOSED" ? "result" : "done";
+          if (state.status === "CLOSED") {
+            startResultCountdown();
+          } else {
+            state.step = "done";
+          }
         }
       } catch (error) {
         state.errorMsg = "네트워크 오류가 발생했습니다. 잠시 뒤 다시 시도해주세요.";
@@ -293,13 +330,14 @@
 
         if (cmd === "reset") {
           localStorage.removeItem(STORAGE_VOTE);
+          clearResultCountdown();
           state.step = "intro";
           state.myClass = null;
           state.investments = {};
         }
 
         if (cmd === "close") {
-          state.step = "result";
+          startResultCountdown();
         }
 
         const doneText = {
@@ -360,6 +398,7 @@
       if (state.step === "intro") html += renderIntro();
       if (state.step === "vote") html += renderVote();
       if (state.step === "done") html += renderDone();
+      if (state.step === "countdown") html += renderCountdown();
       if (state.step === "result") html += renderResult();
 
       html += `</main>`;
@@ -529,6 +568,19 @@
       `;
     }
 
+    function renderCountdown() {
+      return `
+        <section class="bg-white rounded-lg shadow-xl p-8 md:p-12 text-center animate-fade-in">
+          <div class="text-sm font-bold text-blue-500 mb-3">최종 결과 공개</div>
+          <div class="w-32 h-32 mx-auto mb-6 rounded-full bg-gradient-to-br from-blue-500 to-emerald-500 text-white flex items-center justify-center shadow-lg">
+            <span class="text-7xl font-black leading-none">${state.countdown}</span>
+          </div>
+          <h2 class="text-3xl md:text-4xl font-bold text-slate-800 mb-4">잠시 후 결과를 공개합니다</h2>
+          <p class="text-lg text-slate-500">모든 학생이 함께 최종 결과를 확인합니다.</p>
+        </section>
+      `;
+    }
+
     function renderResult() {
       const sortedTeams = TEAMS.map((team) => ({
         ...team,
@@ -593,7 +645,6 @@
               <i class="fa-solid fa-arrow-trend-up text-6xl text-blue-500 mb-4 animate-pulse drop-shadow-md"></i>
             </div>
             <h2 class="text-3xl font-bold text-slate-800 mb-2">최종 투자 결과</h2>
-            <p class="text-slate-500">같은 반의 중복 기록은 첫 투표 1건만 집계됩니다.</p>
           </div>
 
           <div class="space-y-4 relative">${ranksHtml}</div>
