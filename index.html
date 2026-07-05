@@ -291,6 +291,14 @@ ${summaryLines}
       }
     };
 
+    window.adminGoHome = () => {
+      state.step = "intro";
+      state.myClass = null;
+      state.investments = {};
+      state.errorMsg = null;
+      render();
+    };
+
     window.adminCommand = async (cmd) => {
       const confirmMsg = cmd === "close"
         ? "투표를 마감하고 최종 결과를 확인하시겠습니까?"
@@ -397,6 +405,10 @@ ${summaryLines}
             <i class="fa-solid fa-user-tie"></i> 선생님 관리자 메뉴
           </h3>
 
+          <button onclick="adminGoHome()" class="w-full mb-3 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 rounded-xl font-bold border border-slate-200 transition-colors">
+            <i class="fa-solid fa-house"></i> 홈으로 가기
+          </button>
+
           <button onclick="adminCommand('close')" class="w-full mb-3 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold animate-pulse shadow-md transition-colors">
             <i class="fa-solid fa-stopwatch"></i> 투표 마감 및 최종 결과 확인
           </button>
@@ -414,18 +426,25 @@ ${summaryLines}
 
     function renderIntro() {
       let buttonsHtml = "";
+      const isClosed = state.status === "CLOSED";
 
       for (let num = 1; num <= 10; num++) {
         buttonsHtml += `
-          <button onclick="handleStart(${num})" class="py-3 bg-slate-100 hover:bg-blue-100 hover:text-blue-600 rounded-xl transition-colors font-bold text-lg shadow-sm border border-slate-200">
+          <button
+            onclick="${isClosed ? "" : `handleStart(${num})`}"
+            ${isClosed ? "disabled" : ""}
+            class="py-3 rounded-xl transition-colors font-bold text-lg shadow-sm border border-slate-200
+              ${isClosed
+                ? "bg-slate-200 text-slate-400 cursor-not-allowed opacity-50"
+                : "bg-slate-100 hover:bg-blue-100 hover:text-blue-600"}">
             ${num}반
           </button>
         `;
       }
 
-      const closedBanner = state.status === "CLOSED" ? `
+      const closedBanner = isClosed ? `
         <div class="bg-red-100 text-red-600 p-4 rounded-xl mb-6 font-bold text-lg border-2 border-red-200 animate-pulse">
-          🚨 현재 투표가 마감되었습니다! 🚨
+          🚨 현재 투표가 마감되었습니다! 반 선택 버튼이 비활성화되었습니다. 🚨
         </div>
       ` : "";
 
@@ -481,7 +500,7 @@ ${summaryLines}
         const disableMinus = isMyClass || currentInv === 0;
 
         teamsHtml += `
-          <div class="bg-white rounded-3xl p-6 shadow-md border-2 transition-all flex flex-col justify-between 
+          <div class="bg-white rounded-3xl p-6 shadow-md border-2 transition-all flex flex-col justify-between
             ${isMyClass ? "border-slate-200 opacity-60 bg-slate-50" : "border-transparent hover:shadow-lg hover:border-blue-200"} ${currentInv > 0 ? "border-blue-400 bg-blue-50" : ""}">
 
             <div class="flex justify-between items-start mb-6">
@@ -679,15 +698,17 @@ ${summaryLines}
             ${ranksHtml}
           </div>
 
-          <div class="mt-12 bg-blue-50 text-blue-700 p-6 rounded-2xl text-center shadow-inner">
-            <i class="fa-solid fa-coins text-4xl mb-2 text-yellow-500 block"></i>
+          ${!isClosed ? `
+            <div class="mt-12 bg-blue-50 text-blue-700 p-6 rounded-2xl text-center shadow-inner">
+              <i class="fa-solid fa-coins text-4xl mb-2 text-yellow-500 block"></i>
 
-            <p class="text-xl font-bold mb-4">내가 투자한 내역</p>
+              <p class="text-xl font-bold mb-4">내가 투자한 내역</p>
 
-            <div class="flex flex-wrap justify-center gap-3">
-              ${myInvestmentsHtml}
+              <div class="flex flex-wrap justify-center gap-3">
+                ${myInvestmentsHtml}
+              </div>
             </div>
-          </div>
+          ` : ""}
 
           ${!isClosed ? `
             <div class="mt-8 text-center">
